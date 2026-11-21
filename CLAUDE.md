@@ -20,6 +20,7 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 | Seed sources | `uv run python -m app.cli seed-sources` (idempotent; only adds missing slugs) | verified |
 | Fetch feeds | `uv run python -m app.cli fetch --source <slug>` (repeatable) or `--all-active`. Makes real outbound requests; exits 1 if any feed fails | verified |
 | Seed profiles | `uv run python -m app.cli seed-profiles` (adds the `detection` profile v1 if missing) | verified |
+| Priority report | `uv run python -m app.cli priority-report [--drop TERM]` (scores every stored article with the Huntable-seeded keyword lists; writes nothing) | verified |
 | Queue runs (batch) | `uv run python -m app.cli queue-runs [--source <slug>] [--limit 20]` (articles with no run yet) | verified |
 | Worker | `uv run python -m app.worker` (polls) or `--once` (drains the queue, then exits). Needs `ANTHROPIC_API_KEY` in `api/.env`; `LLM_PROVIDER=offline` runs without a model and fails each stage with an explanation | verified (offline + missing-key paths) |
 | Tests | `uv run pytest` (needs the compose db; migrates and truncates `detection_test`, exits with code 2 if unreachable) | verified |

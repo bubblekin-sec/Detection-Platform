@@ -30,3 +30,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Huntable CTI Studio: keyword registry (priority scoring)
+
+- File: `api/app/profiles/seed_data/vendor/huntable_keyword_registry.yaml` (verbatim copy of `config/keyword_registry.yaml`). The license travels with it in `LICENSE.huntable` in the same folder. Corrections (dropped noisy terms, cross-tier dedupe, prefix terms) are applied in `api/app/profiles/huntable_keywords.py`, never in the YAML.
+- The scoring algorithm in `api/app/pipeline/priority.py` is modelled on Huntable's `ThreatHuntingScorer`.
+- Upstream: https://github.com/dfirtnt/Huntable-CTI-Studio
+- Pinned commit: `904a6c49b398b180a28b5961070790252e73fe53` (2026-10-28)
+- License: MIT (same text as above)

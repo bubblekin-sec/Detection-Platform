@@ -1,6 +1,6 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: increments 1 to 7 done. Next: 8 (YAML export), then 6b (LLM-written KQL fallback). 7 was built before 6b on purpose: it is deterministic, while 6b adds more model behaviour that has not been checked against a real API yet.
+Status: increments 1 to 7 done. The next phase (priority scoring, gated model use, workbench UI, then 6b) is planned in [priority-and-workbench.md](priority-and-workbench.md). Increment 8 (YAML export) and 9 (containers) follow it.
 
 **7 notes (review).**
 - **API:**

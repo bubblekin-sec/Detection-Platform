@@ -8,7 +8,9 @@ from sqlalchemy import select
 from app.config import Settings
 from app.db import make_engine, make_session_factory
 from app.models import Article, PipelineRun, Source
+from app.pipeline.priority_report import priority_report
 from app.pipeline.run import queue_run
+from app.profiles.huntable_keywords import load_huntable_priority
 from app.profiles.seed import latest_version, seed_profiles
 from app.sources.fetch import build_fetcher
 from app.sources.ingest import SourceFetchFailed, ingest_source
@@ -30,6 +32,10 @@ def main(argv: list[str] | None = None) -> int:
     queue.add_argument("--profile", default="detection")
     queue.add_argument("--source", metavar="SLUG", help="Only articles from this source.")
     queue.add_argument("--limit", type=int, default=20, help="At most this many articles (default 20).")
+    report = commands.add_parser(
+        "priority-report", help="Score every stored article with the Huntable-seeded priority config; writes nothing."
+    )
+    report.add_argument("--drop", action="append", default=[], metavar="TERM", help="Also drop this term (repeatable).")
     args = parser.parse_args(argv)
 
     settings = Settings()
@@ -49,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Profiles added: {result['added']}, already present: {result['existing']}")
             elif args.command == "queue-runs":
                 exit_code = _queue_runs(session, args)
+            elif args.command == "priority-report":
+                print(priority_report(session, load_huntable_priority(extra_dropped=set(args.drop))))
     finally:
         engine.dispose()
     return exit_code

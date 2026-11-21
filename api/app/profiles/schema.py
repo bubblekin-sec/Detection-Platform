@@ -5,7 +5,7 @@ A non-technical editor (later increment) edits these fields; `compile.py` turns 
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 
 FIELD_NAME_PATTERN = r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$"  # max length enforced separately (50)
 RESERVED_ITEM_FIELDS = {"value", "evidence"}
@@ -61,6 +61,47 @@ class ExtractField(BaseModel):
         return tags
 
 
+PRIORITY_BUCKETS = ("perfect", "lolbas", "intelligence", "good", "negative")
+PriorityBucketName = Literal["perfect", "lolbas", "intelligence", "good", "negative"]
+
+
+class PriorityTerm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    term: str = Field(min_length=1, max_length=200)
+    # word: whole-word match (boundaries only where the term starts/ends with a word character); prefix: also
+    # matches longer words starting with the term (e.g. "hunting" matches "huntingly", "spawn" matches "spawned").
+    match: Literal["word", "prefix"] = "word"
+
+
+class PriorityBucket(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_points: float = Field(ge=0, le=100)
+    terms: list[PriorityTerm] = Field(default_factory=list)
+
+
+class PriorityConfig(BaseModel):
+    """Free, deterministic article scoring that decides which articles are worth any model call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    buckets: dict[PriorityBucketName, PriorityBucket]
+    # Articles scoring at least this are auto-queued for the model pipeline; null turns auto-queueing off.
+    threshold: float | None = Field(default=None, ge=0, le=99.9)
+
+    @model_validator(mode="after")
+    def terms_belong_to_one_bucket(self) -> "PriorityConfig":
+        seen: dict[str, str] = {}
+        for name, bucket in self.buckets.items():
+            for term in bucket.terms:
+                key = term.term.casefold()
+                if key in seen and seen[key] != name:
+                    raise ValueError(f"term '{term.term}' is in more than one bucket ({seen[key]}, {name})")
+                seen[key] = name
+        return self
+
+
 class ProfileDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -71,6 +112,8 @@ class ProfileDefinition(BaseModel):
     extract_fields: list[ExtractField] = Field(min_length=1)
     output_kind: Literal["sigma_kql"]  # later: "summary" for leadership, etc.
     query_strategy: Literal["converted", "llm", "converted_with_llm_fallback", "both"] = "converted_with_llm_fallback"
+    # Optional: profiles without it (e.g. detection v1) are never scored or auto-queued.
+    priority: PriorityConfig | None = None
 
     @field_validator("extract_fields")
     @classmethod
