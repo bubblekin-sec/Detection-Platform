@@ -30,3 +30,31 @@ class FakeFetcher:
         if isinstance(result, FetchError):
             raise result
         return result
+
+
+class ScriptedLLM:
+    """Returns queued outputs (or raises queued errors) per schema; records every call for assertions."""
+
+    provider = "scripted"
+
+    def __init__(self) -> None:
+        self.queued: dict[str, list] = {}
+        self.calls: list[dict] = []
+
+    def queue(self, schema: type, *outputs) -> None:
+        self.queued.setdefault(schema.__name__, []).extend(outputs)
+
+    def complete_json(self, *, model, system, user, schema, effort=None, max_tokens=8000):
+        from app.llm.client import LLMResult, LLMUsage
+
+        self.calls.append({"model": model, "system": system, "user": user, "schema": schema.__name__, "effort": effort})
+        pending = self.queued.get(schema.__name__) or []
+        if not pending:
+            raise AssertionError(f"ScriptedLLM has no queued output for {schema.__name__}")
+        output = pending.pop(0)
+        if callable(output) and not isinstance(output, type):
+            output = output()  # a callback can probe state mid-call (locks, run status) and return the output
+        if isinstance(output, BaseException):
+            raise output
+        usage = LLMUsage(input_tokens=1200, output_tokens=150, cache_read_tokens=0)
+        return LLMResult(output=output, model=model, usage=usage, request_id="req_test")

@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent } from 'react'
 
 import { describeError, getArticle, listArticles, listSources, type ArticleDetail, type ArticleSummary, type Source } from './api'
+import { RunPanel } from './RunPanel'
 
 const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
@@ -138,6 +139,7 @@ export function ArticleReader({ id, onBack }: { id: number; onBack: () => void }
               Open original ↗
             </a>
           </p>
+          <RunPanel articleId={article.id} />
           <div className="article-text">
             {article.content_text.split('\n').map((paragraph, index) => (
               <p key={index}>{paragraph}</p>

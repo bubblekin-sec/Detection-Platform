@@ -1,6 +1,31 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: increments 1, 2a, 2b and 3 done. Increment 4 (profiles, runs, worker, relevance) is next.
+Status: increments 1 to 4 done. Increment 5 (extraction) is next.
+
+**4 notes (profiles, runs, worker, relevance).**
+- **The detection profile is seeded as v1** from `app/profiles/seed_data/detection.yaml`. Profile versions are immutable, and every run records the version it used. The relevance prompt is compiled from the profile's `audience`, `relevant_if` and `ignore_if`, and is stored on each stage result for the later "advanced view".
+- **Run lifecycle:** queued → running → filtered_out | succeeded | failed.
+  - The worker claims runs with `FOR UPDATE SKIP LOCKED` and commits the claim before calling the model, so no transaction is open during LLM calls.
+  - A crash marks the run failed instead of leaving it stuck. So do Ctrl+C and SIGTERM, which are recorded as "Interrupted" before the worker exits. Re-queueing an article with an active run returns that run.
+  - A partial unique index allows only one queued or running run per article and profile version, so concurrent requests cannot queue duplicates.
+  - Each stage updates `heartbeat_at`. Before claiming, workers fail any `running` run with no progress for `RUN_STALE_AFTER_SECONDS` (default 900), so a killed worker never blocks an article.
+  - `queue-runs` re-queues articles whose runs all failed.
+- **LLM client:**
+  - Uses `messages.create` with an `output_config.format` JSON schema, not `messages.parse`. `parse` validates JSON before `stop_reason` can be checked, so a refusal or a truncated response would surface as a pydantic error.
+  - API errors keep the API's own message, capped at 300 characters.
+  - Tested against canned responses through `httpx2.MockTransport` (`tests/test_anthropic_client.py`).
+- **Article input:** XML-escaped, so it cannot close `<article>` and pose as instructions. Capped at 100k characters; the stage output records `article_truncated`.
+- **Relevance:**
+  - Uses `claude-haiku-5-5` at effort `low` with structured outputs (`messages.parse`). Scores are clamped to 0–10 and compared with the profile's `min_score` (6).
+  - Refusals, API errors and output-limit hits fail the run with a readable message, never a secret.
+  - Token usage is stored per stage.
+- **Credentials:** only the worker builds an LLM client. With no key it refuses to start (exit 2, actionable message), and the API keeps working. `LLM_PROVIDER=offline` lets the UI and worker run end to end at no cost.
+- **Portability:**
+  - The worker is a second Container App with no ingress.
+  - `ANTHROPIC_API_KEY` comes from a Container Apps secret or Key Vault reference.
+  - Egress must allow `api.anthropic.com`, or the approved provider's endpoint once `build_llm_client` gains it.
+  - Scaling to more than one worker is safe because of `SKIP LOCKED`.
+- **Not verified yet:** a real model call. Needs `ANTHROPIC_API_KEY` in `api/.env`, then `uv run python -m app.cli queue-runs --limit 5` and `uv run python -m app.worker --once`.
 
 **3 notes (fetch now → articles).**
 - **Live check, 2026-11-21:** all 28 active seed sources fetched, giving about 750 articles. Only about 20 items were too short.

@@ -51,6 +51,34 @@ export interface ArticleDetail extends ArticleSummary {
   content_text: string
 }
 
+export type RunStatus = 'queued' | 'running' | 'filtered_out' | 'succeeded' | 'failed'
+
+export interface StageResult {
+  stage: string
+  status: 'passed' | 'filtered' | 'failed'
+  output: Record<string, unknown>
+  compiled_prompt: string | null
+  model: string | null
+  input_tokens: number | null
+  output_tokens: number | null
+  cache_read_tokens: number | null
+  started_at: string
+  finished_at: string
+}
+
+export interface PipelineRun {
+  id: number
+  article_id: number
+  profile: { slug: string; version: number }
+  status: RunStatus
+  current_step: string | null
+  error: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  stages: StageResult[]
+}
+
 /** The API returns every 4xx as {"detail": {"errors": ["field: message" | "message"]}}. */
 export class ApiError extends Error {
   readonly status: number
@@ -105,3 +133,7 @@ export const fetchSourceNow = (id: number) => request<FetchSummary>('POST', `/ap
 export const listArticles = (sourceId?: number) =>
   request<ArticleSummary[]>('GET', sourceId === undefined ? '/api/articles' : `/api/articles?source_id=${sourceId}`)
 export const getArticle = (id: number) => request<ArticleDetail>('GET', `/api/articles/${id}`)
+export const listArticleRuns = (articleId: number) => request<PipelineRun[]>('GET', `/api/articles/${articleId}/runs`)
+export const queueRun = (articleId: number, profile = 'detection') =>
+  request<PipelineRun>('POST', `/api/articles/${articleId}/runs`, { profile })
+export const getRun = (id: number) => request<PipelineRun>('GET', `/api/runs/${id}`)

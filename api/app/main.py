@@ -9,6 +9,7 @@ from app.config import Settings
 from app.articles.router import router as articles_router
 from app.db import make_engine, make_session_factory
 from app.detection.router import router as detection_router
+from app.runs.router import router as runs_router
 from app.sources.fetch import Fetcher, build_fetcher
 from app.sources.router import router as sources_router
 
@@ -50,6 +51,7 @@ def create_app(settings: Settings | None = None, *, fetcher: Fetcher | None = No
     app.include_router(detection_router)
     app.include_router(sources_router)
     app.include_router(articles_router)
+    app.include_router(runs_router)
     return app
 
 

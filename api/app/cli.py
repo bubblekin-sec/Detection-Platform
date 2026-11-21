@@ -7,7 +7,9 @@ from sqlalchemy import select
 
 from app.config import Settings
 from app.db import make_engine, make_session_factory
-from app.models import Source
+from app.models import Article, PipelineRun, Source
+from app.pipeline.run import queue_run
+from app.profiles.seed import latest_version, seed_profiles
 from app.sources.fetch import build_fetcher
 from app.sources.ingest import SourceFetchFailed, ingest_source
 from app.sources.seed import seed_sources
@@ -21,6 +23,13 @@ def main(argv: list[str] | None = None) -> int:
     target = fetch.add_mutually_exclusive_group(required=True)
     target.add_argument("--source", action="append", metavar="SLUG", help="Source slug (repeatable).")
     target.add_argument("--all-active", action="store_true", help="Every active source.")
+    commands.add_parser("seed-profiles", help="Add built-in profiles that are missing (detection). Never changes existing ones.")
+    queue = commands.add_parser(
+        "queue-runs", help="Queue pipeline runs for the newest articles that have none yet. The worker executes them."
+    )
+    queue.add_argument("--profile", default="detection")
+    queue.add_argument("--source", metavar="SLUG", help="Only articles from this source.")
+    queue.add_argument("--limit", type=int, default=20, help="At most this many articles (default 20).")
     args = parser.parse_args(argv)
 
     settings = Settings()
@@ -35,9 +44,37 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Not added (slug used by a user source): {', '.join(result['skipped_user_owned'])}")
             elif args.command == "fetch":
                 exit_code = _fetch(session, settings, args)
+            elif args.command == "seed-profiles":
+                result = seed_profiles(session)
+                print(f"Profiles added: {result['added']}, already present: {result['existing']}")
+            elif args.command == "queue-runs":
+                exit_code = _queue_runs(session, args)
     finally:
         engine.dispose()
     return exit_code
+
+
+def _queue_runs(session, args) -> int:
+    version = latest_version(session, args.profile)
+    if version is None:
+        print(f"Unknown profile '{args.profile}'. Run seed-profiles first.", file=sys.stderr)
+        return 2
+    if args.source and session.scalar(select(Source.id).where(Source.slug == args.source)) is None:
+        print(f"Unknown source slug: {args.source}", file=sys.stderr)
+        return 2
+    # Articles with no run for this version, or whose runs all failed (e.g. before a key was configured).
+    already_run = select(PipelineRun.article_id).where(
+        PipelineRun.profile_version_id == version.id, PipelineRun.status != "failed"
+    )
+    query = select(Article.id).where(Article.id.not_in(already_run))
+    if args.source:
+        query = query.join(Source).where(Source.slug == args.source)
+    query = query.order_by(Article.published_at.desc().nulls_last(), Article.id.desc()).limit(max(1, args.limit))
+    article_ids = list(session.scalars(query))
+    for article_id in article_ids:
+        queue_run(session, article_id, version)
+    print(f"Queued {len(article_ids)} run(s) for profile '{args.profile}' v{version.version}. Start the worker to process them.")
+    return 0
 
 
 def _fetch(session, settings: Settings, args) -> int:

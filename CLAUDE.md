@@ -19,6 +19,9 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 | Migrate | `uv run alembic upgrade head` | verified |
 | Seed sources | `uv run python -m app.cli seed-sources` (idempotent; only adds missing slugs) | verified |
 | Fetch feeds | `uv run python -m app.cli fetch --source <slug>` (repeatable) or `--all-active`. Makes real outbound requests; exits 1 if any feed fails | verified |
+| Seed profiles | `uv run python -m app.cli seed-profiles` (adds the `detection` profile v1 if missing) | verified |
+| Queue runs (batch) | `uv run python -m app.cli queue-runs [--source <slug>] [--limit 20]` (articles with no run yet) | verified |
+| Worker | `uv run python -m app.worker` (polls) or `--once` (drains the queue, then exits). Needs `ANTHROPIC_API_KEY` in `api/.env`; `LLM_PROVIDER=offline` runs without a model and fails each stage with an explanation | verified (offline + missing-key paths) |
 | Tests | `uv run pytest` (needs the compose db; migrates and truncates `detection_test`, exits with code 2 if unreachable) | verified |
 | New migration | `uv run alembic revision --autogenerate -m "<change>" --rev-id <NNNN>`, then review the generated file | verified |
 | Run locally | `uv run uvicorn app.main:app --reload` (http://localhost:8000/api/health, docs at `/docs`) | verified |
@@ -29,6 +32,8 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 - Settings come from env or `api/.env` (see `api/.env.example`). Use `127.0.0.1`, not `localhost`, in local database URLs: on Windows, `localhost` tries IPv6 first and adds about 5 seconds to every connection.
 - The database engine is built only in `app/db.py` `make_engine()`. Tests use the same function.
 - Seed sources come from the vendored Huntable list. Its provenance and pinned commit are in `THIRD_PARTY_NOTICES.md`. Never edit the vendored YAML; put corrections in `SEED_FIXES` in `app/sources/seed.py`.
+- LLM calls go only through the `LLMClient` interface (`app/llm/client.py`), built only by `app/llm/factory.py` `build_llm_client()`, and only the worker builds one. Tests use `tests/fakes.py` `ScriptedLLM` and must never call a real model. Per-stage model settings: `RELEVANCE_MODEL` (default `claude-haiku-5-5`), `EXTRACTION_MODEL` and `RULES_MODEL` (default `claude-opus-5-5`).
+- Prompts are compiled from profile definitions in `app/profiles/compile.py`. Article text is untrusted: it goes in the user message inside `<article>` tags, and the system prompt says to ignore instructions inside it.
 - All outbound HTTP goes through `app/sources/fetch.py` (SSRF guard: public addresses only, re-checked on each redirect, size cap). It is built only by `build_fetcher(settings)`; tests inject `tests/fakes.py` `FakeFetcher` via `create_app(settings, fetcher=...)`. Tests must never reach the network.
 
 ### UI (`ui/`, React 19 + Vite 8 + TypeScript 7, npm)

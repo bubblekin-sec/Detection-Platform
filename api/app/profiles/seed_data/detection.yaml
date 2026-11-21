@@ -1,0 +1,39 @@
+# Detection engineering profile, version 1. Seeded by `python -m app.cli seed-profiles`.
+# Editing this file does not change an existing database; new versions are created through the profile editor (later).
+slug: detection
+name: Detection engineering
+description: Turns threat intelligence into Sigma rules and Defender XDR queries.
+definition:
+  audience: a detection engineer who writes Sigma rules and Microsoft Defender XDR hunting queries
+  relevant_if: >-
+    The article describes attacker behaviour on endpoints that a defender could detect in endpoint telemetry,
+    with concrete technical detail: specific commands or command lines, process execution chains, persistence
+    (registry run keys, services, scheduled tasks), credential access, lateral movement or defence evasion,
+    naming tools, file paths, registry keys, service or task names, or network indicators. Windows content is
+    the priority; Linux and macOS count when equally concrete.
+  ignore_if: >-
+    Vendor marketing or product announcements, funding or earnings news, event or webinar promotion, policy,
+    legal or regulatory news, opinion pieces, vulnerability notices without exploitation behaviour, and breach
+    reports that name victims but give no technical detail of how the attack was carried out.
+  min_score: 6
+  output_kind: sigma_kql
+  query_strategy: converted_with_llm_fallback
+  extract_fields:
+    - name: cmdline
+      description: Full command lines the attacker ran, exactly as written in the article.
+      tags: [platform, telemetry_category, logsource_hint]
+    - name: process_lineage
+      description: Parent and child process relationships, e.g. winword.exe spawning cmd.exe.
+      tags: [platform, telemetry_category, logsource_hint]
+    - name: registry_artifacts
+      description: Registry keys and values created or modified, with the data written when given.
+      tags: [platform, telemetry_category, logsource_hint]
+    - name: scheduled_tasks
+      description: Scheduled tasks created or modified, with task name, command and trigger when given.
+      tags: [platform, telemetry_category, logsource_hint]
+    - name: windows_services
+      description: Windows services installed or modified, with service name and binary path when given.
+      tags: [platform, telemetry_category, logsource_hint]
+    - name: network_indicators
+      description: Domains, IP addresses, URLs, ports or user agents used for delivery or command and control.
+      tags: [platform, telemetry_category, logsource_hint]

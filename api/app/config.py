@@ -1,3 +1,6 @@
+from typing import Literal
+
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Matches docker-compose.yml's laptop-only database. Deployed environments must set DATABASE_URL.
@@ -15,3 +18,16 @@ class Settings(BaseSettings):
     fetch_timeout_seconds: float = 15
     fetch_user_agent: str = "DetectionPlatform/0.1 (threat intelligence feed reader)"
     fetch_max_bytes: int = 20_000_000  # full-content feeds (e.g. Elastic Security Labs) exceed 5 MB
+
+    # LLM (app/llm/factory.py). Only the worker builds a client; the API never calls a model.
+    llm_provider: Literal["anthropic", "offline"] = "anthropic"
+    anthropic_api_key: SecretStr | None = None  # from ANTHROPIC_API_KEY; SecretStr keeps it out of reprs and logs
+    llm_timeout_seconds: float = 120
+    relevance_model: str = "claude-haiku-5-5"
+    relevance_effort: Literal["low", "medium", "high"] = "low"
+    extraction_model: str = "claude-opus-5-5"
+    rules_model: str = "claude-opus-5-5"
+
+    worker_poll_seconds: float = 2
+    # A running run with no progress for this long is failed so it can be re-queued (> LLM timeout x retries).
+    run_stale_after_seconds: int = 900
