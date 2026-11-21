@@ -42,30 +42,48 @@ def _no_nul(value: str | None) -> str | None:
     return value
 
 
-def _stored_url_fits(value: HttpUrl) -> HttpUrl:
+def _stored_url_fits(value: HttpUrl | None) -> HttpUrl | None:
     # Normalization (percent-encoding, punycode) can make the stored form longer than the input.
-    if len(str(value)) > MAX_URL_LENGTH:
+    if value is not None and len(str(value)) > MAX_URL_LENGTH:
         raise ValueError(f"must be at most {MAX_URL_LENGTH} characters after normalization")
     return value
 
 
-class SourceCreate(BaseModel):
+def _name_has_a_slug(name: str) -> str:
+    if not slugify(name):
+        raise ValueError("must contain at least one letter or digit")
+    return name.strip()
+
+
+class SourceFieldRules(BaseModel):
+    """Validation shared by create and update. HttpUrl accepts only http and https."""
+
+    _text_has_no_nul = field_validator("name", "description", check_fields=False)(_no_nul)
+    _urls_fit = field_validator("url", "rss_url", check_fields=False)(_stored_url_fits)
+    _name_slug = field_validator("name", check_fields=False)(_name_has_a_slug)
+
+
+class SourceCreate(SourceFieldRules):
     name: str = Field(min_length=1, max_length=200)
-    # HttpUrl accepts only http and https.
     url: HttpUrl = Field(max_length=MAX_URL_LENGTH)
     rss_url: HttpUrl = Field(max_length=MAX_URL_LENGTH)
     description: str | None = Field(default=None, max_length=2000)
     check_frequency_seconds: int = Field(default=3600, ge=300, le=7 * 86400)
 
-    _text_has_no_nul = field_validator("name", "description")(_no_nul)
-    _urls_fit = field_validator("url", "rss_url")(_stored_url_fits)
 
-    @field_validator("name")
-    @classmethod
-    def name_has_a_slug(cls, name: str) -> str:
-        if not slugify(name):
-            raise ValueError("must contain at least one letter or digit")
-        return name.strip()
+class SourceUpdate(SourceFieldRules):
+    """Partial update: only fields present in the request change. Defaults are never validated or applied,
+    so an explicit null is rejected for fields that cannot be empty, while omitting them leaves them unchanged.
+    Unknown or read-only fields (slug, origin) are rejected rather than silently ignored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(default=None, min_length=1, max_length=200)  # type: ignore[assignment]
+    url: HttpUrl = Field(default=None, max_length=MAX_URL_LENGTH)  # type: ignore[assignment]
+    rss_url: HttpUrl | None = Field(default=None, max_length=MAX_URL_LENGTH)
+    description: str | None = Field(default=None, max_length=2000)
+    active: bool = Field(default=None)  # type: ignore[assignment]
+    check_frequency_seconds: int = Field(default=None, ge=300, le=7 * 86400)  # type: ignore[assignment]
 
 
 def slugify(name: str) -> str:
@@ -99,6 +117,23 @@ def create_source(body: SourceCreate, session: SessionDep) -> Source:
         if violated_constraint(error) != SOURCE_SLUG_CONSTRAINT:
             raise
         raise HTTPException(status_code=409, detail={"errors": [f"A source with slug '{slug}' already exists."]})
+    return source
+
+
+@router.patch("/{source_id}", response_model=SourceOut)
+def update_source(source_id: int, body: SourceUpdate, session: SessionDep) -> Source:
+    # Row lock: the active/rss_url rule spans two columns, so concurrent PATCHes must not interleave.
+    source = session.get(Source, source_id, with_for_update=True)
+    if source is None:
+        raise HTTPException(status_code=404, detail={"errors": [f"Source {source_id} not found."]})
+    # The slug is a stable identifier and stays the same when a source is renamed.
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(source, field, str(value) if field in ("url", "rss_url") and value is not None else value)
+    if source.active and not source.rss_url:
+        session.rollback()
+        # The MVP fetches RSS only, so an active source must have a feed.
+        raise HTTPException(status_code=422, detail={"errors": ["rss_url: an active source needs an RSS feed URL"]})
+    session.commit()
     return source
 
 

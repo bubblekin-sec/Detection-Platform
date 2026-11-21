@@ -15,6 +15,8 @@ class Source(Base):
     __table_args__ = (
         CheckConstraint("origin IN ('huntable_seed', 'user')", name="ck_sources_origin"),
         UniqueConstraint("slug", name=SOURCE_SLUG_CONSTRAINT),
+        # The MVP fetches RSS only; the database enforces this even if two requests race past the API check.
+        CheckConstraint("NOT active OR rss_url IS NOT NULL", name="ck_sources_active_needs_rss"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -12,8 +12,13 @@ from app.sources.router import router as sources_router
 
 
 async def request_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
-    """Return every 422 as {"detail": {"errors": [str]}} so clients handle one shape."""
-    errors = [f"{'.'.join(str(part) for part in error['loc'] if part != 'body')}: {error['msg']}" for error in exc.errors()]
+    """Return every 422 as {"detail": {"errors": ["field: message"]}} so clients handle one shape."""
+    errors = []
+    for error in exc.errors():
+        field = ".".join(str(part) for part in error["loc"] if part != "body")
+        # Pydantic prefixes messages from our own validators with "Value error, ".
+        message = error["msg"].removeprefix("Value error, ")
+        errors.append(f"{field}: {message}" if field else message)
     return JSONResponse(status_code=422, content={"detail": {"errors": errors}})
 
 

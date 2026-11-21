@@ -28,3 +28,17 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 - Settings come from env or `api/.env` (see `api/.env.example`). Use `127.0.0.1`, not `localhost`, in local database URLs: on Windows, `localhost` tries IPv6 first and adds about 5 seconds to every connection.
 - The database engine is built only in `app/db.py` `make_engine()`. Tests use the same function.
 - Seed sources come from the vendored Huntable list. Its provenance and pinned commit are in `THIRD_PARTY_NOTICES.md`.
+
+### UI (`ui/`, React 19 + Vite 8 + TypeScript 7, npm)
+
+| Task | Command (run in `ui/`) | Status |
+| --- | --- | --- |
+| Install deps | `npm ci` | verified |
+| Tests | `npm test` (vitest + Testing Library, jsdom; `fetch` stubbed via `src/test/fakeApi.ts`) | verified |
+| Typecheck | `npm run typecheck` | verified |
+| Lint | `npm run lint` (oxlint) | verified |
+| Build | `npm run build` (outputs to `dist/`) | verified |
+| Dev server | `npm run dev` (http://localhost:5173; proxies `/api` to `http://127.0.0.1:8000`, override with `API_PROXY_TARGET`) | verified |
+
+- The UI calls only the same-origin `/api` path. Never put an API hostname into the bundle. In the container, nginx is planned to proxy `/api` (increment 9). It does not exist yet.
+- All API calls go through `src/api.ts`. 4xx responses arrive as `{"detail": {"errors": ["field: message"]}}`; `ApiError.byField()` maps them onto form fields.

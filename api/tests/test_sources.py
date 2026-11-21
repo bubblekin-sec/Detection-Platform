@@ -157,3 +157,125 @@ def test_add_source_rejects_values_postgres_cannot_store(db_client, payload, fie
 
     assert response.status_code == 422
     assert any(error.startswith(field) for error in response.json()["detail"]["errors"])
+
+
+def seeded(db_session, slug: str) -> Source:
+    seed_sources(db_session)
+    return by_slug(db_session, slug)
+
+
+def test_patch_toggles_active(db_client, db_session):
+    talos = seeded(db_session, "cisco_talos")
+
+    response = db_client.patch(f"/api/sources/{talos.id}", json={"active": False})
+
+    assert response.status_code == 200
+    assert response.json()["active"] is False
+    db_session.expire_all()
+    assert by_slug(db_session, "cisco_talos").active is False
+
+
+def test_patch_edits_only_the_fields_sent_and_keeps_the_slug(db_client, db_session):
+    talos = seeded(db_session, "cisco_talos")
+
+    response = db_client.patch(f"/api/sources/{talos.id}", json={"name": "Talos Intelligence", "check_frequency_seconds": 900})
+
+    body = response.json()
+    assert response.status_code == 200
+    assert (body["name"], body["slug"], body["check_frequency_seconds"]) == ("Talos Intelligence", "cisco_talos", 900)
+    assert body["rss_url"] == talos.rss_url
+    assert body["config"] == talos.config
+
+
+def test_patch_rejects_activating_a_source_without_rss(db_client, db_session):
+    splunk = seeded(db_session, "splunk_security_blog")
+
+    response = db_client.patch(f"/api/sources/{splunk.id}", json={"active": True})
+
+    assert response.status_code == 422
+    assert any(error.startswith("rss_url") for error in response.json()["detail"]["errors"])
+
+
+def test_patch_can_add_a_feed_and_activate_in_one_request(db_client, db_session):
+    splunk = seeded(db_session, "splunk_security_blog")
+
+    response = db_client.patch(
+        f"/api/sources/{splunk.id}", json={"rss_url": "https://www.splunk.com/en_us/blog/feed.xml", "active": True}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["active"] is True
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{"rss_url": "ftp://x.example.com"}, {"name": ""}, {"name": "a\u0000"}, {"slug": "renamed"}, {"origin": "user"}, {"active": None}],
+    ids=["bad-scheme", "empty-name", "nul", "slug-is-read-only", "origin-is-read-only", "null-active"],
+)
+def test_patch_rejects_invalid_or_read_only_fields(db_client, db_session, payload):
+    talos = seeded(db_session, "cisco_talos")
+    before = (talos.name, talos.slug, talos.rss_url, talos.active, talos.origin)
+
+    response = db_client.patch(f"/api/sources/{talos.id}", json=payload)
+
+    assert response.status_code == 422
+    db_session.expire_all()
+    talos = by_slug(db_session, "cisco_talos")
+    assert (talos.name, talos.slug, talos.rss_url, talos.active, talos.origin) == before
+
+
+def test_patch_unknown_source_is_404(db_client, db_session):
+    response = db_client.patch("/api/sources/999999", json={"active": False})
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": {"errors": ["Source 999999 not found."]}}
+
+
+@pytest.mark.parametrize("field", ["name", "url", "check_frequency_seconds"])
+def test_patch_rejects_explicit_null_for_required_fields(db_client, db_session, field):
+    talos = seeded(db_session, "cisco_talos")
+
+    response = db_client.patch(f"/api/sources/{talos.id}", json={field: None})
+
+    assert response.status_code == 422
+    assert any(error.startswith(field) for error in response.json()["detail"]["errors"])
+
+
+def test_patch_cannot_remove_the_feed_of_an_active_source(db_client, db_session):
+    talos = seeded(db_session, "cisco_talos")
+    original_name = talos.name
+
+    response = db_client.patch(f"/api/sources/{talos.id}", json={"name": "Renamed", "rss_url": None})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": {"errors": ["rss_url: an active source needs an RSS feed URL"]}}
+    db_session.expire_all()
+    talos = by_slug(db_session, "cisco_talos")
+    assert (talos.name, talos.rss_url is not None) == (original_name, True)
+
+
+def test_database_enforces_active_sources_have_a_feed(db_session):
+    from sqlalchemy.exc import IntegrityError
+
+    talos = seeded(db_session, "cisco_talos")
+    talos.rss_url = None
+
+    with pytest.raises(IntegrityError, match="ck_sources_active_needs_rss"):
+        db_session.commit()
+    db_session.rollback()
+
+
+def test_validator_messages_have_no_pydantic_prefix(db_client):
+    response = db_client.post("/api/sources", json={"name": "!!!", "url": "https://x.example.com", "rss_url": "https://x.example.com/f"})
+
+    assert response.json()["detail"]["errors"] == ["name: must contain at least one letter or digit"]
+
+
+def test_create_still_ignores_unknown_fields(db_client, db_session):
+    response = db_client.post(
+        "/api/sources",
+        json={"name": "Extra Fields", "url": "https://x.example.com", "rss_url": "https://x.example.com/f", "active": False},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["active"] is True
