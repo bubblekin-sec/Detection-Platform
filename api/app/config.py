@@ -10,3 +10,8 @@ class Settings(BaseSettings):
     app_name: str = "Detection Platform API"
     database_url: str = LOCAL_DATABASE_URL
     database_connect_timeout_seconds: int = 5
+
+    # Outbound feed / article fetching (app/sources/fetch.py). A generic agent string, no personal details.
+    fetch_timeout_seconds: float = 15
+    fetch_user_agent: str = "DetectionPlatform/0.1 (threat intelligence feed reader)"
+    fetch_max_bytes: int = 20_000_000  # full-content feeds (e.g. Elastic Security Labs) exceed 5 MB

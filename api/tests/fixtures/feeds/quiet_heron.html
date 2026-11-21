@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- Synthetic article page for tests. -->
+<html>
+<head><title>Quiet Heron loader analysis</title><script>var tracking = 1;</script></head>
+<body>
+  <nav>Home | Research | Careers</nav>
+  <div class="post-content">
+    <h1>Quiet Heron loader analysis</h1>
+    <p>Quiet Heron is delivered as an ISO containing a LNK file that runs <code>cmd.exe /c start /min powershell -nop -w hidden -enc SQBFAFgA</code>.</p>
+    <p>The loader drops <code>C:\ProgramData\heron\svc.dll</code> and registers it with <code>regsvr32 /s</code>.</p>
+    <p>It installs a service named HeronUpdate with <code>sc.exe create HeronUpdate binPath= C:\ProgramData\heron\svc.exe start= auto</code>.
+    The remaining text pads this synthetic article so that it is comfortably above the minimum content length that the
+    junk filter applies, similar to a full research post that the RSS feed only teased in its description element.</p>
+  </div>
+  <footer>Copyright Example Research. Subscribe to our newsletter.</footer>
+</body>
+</html>

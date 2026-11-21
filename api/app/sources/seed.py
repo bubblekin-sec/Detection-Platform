@@ -13,10 +13,19 @@ from app.models import Source
 SEED_FILE = files("app.sources") / "seed_data" / "huntable_sources.yaml"
 DEFAULT_CHECK_FREQUENCY_SECONDS = 4 * 3600
 
+# Corrections to the pinned upstream list, kept separate so the vendored file stays verbatim.
+# Each entry was found by fetching the upstream URL (2026-11-21) and following where the site moved its feed.
+SEED_FIXES: dict[str, dict[str, Any]] = {
+    # Upstream /security-labs/feed/ returns 404; the feed moved (and carries full text, ~5+ MB).
+    "elastic_security_labs": {"rss_url": "https://www.elastic.co/security-labs/rss/feed.xml"},
+    # blog.sekoia.io moved to sekoia.com (Webflow); the old category feed now redirects to an HTML page.
+    "sekoia_io_blog": {"url": "https://www.sekoia.com/blog", "rss_url": "https://www.sekoia.com/blog/rss.xml"},
+}
+
 
 def load_seed_rows() -> list[dict[str, Any]]:
     catalog = yaml.safe_load(SEED_FILE.read_text(encoding="utf-8"))
-    return [_to_row(entry) for entry in catalog["sources"]]
+    return [_to_row(entry | SEED_FIXES.get(entry["id"], {})) for entry in catalog["sources"]]
 
 
 def _to_row(entry: dict[str, Any]) -> dict[str, Any]:

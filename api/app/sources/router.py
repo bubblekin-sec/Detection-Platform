@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -10,10 +10,26 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.models import SOURCE_SLUG_CONSTRAINT, Source
+from app.sources.fetch import Fetcher
+from app.sources.ingest import SourceFetchFailed, ingest_source
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
+
+
+def get_fetcher(request: Request) -> Fetcher:
+    return request.app.state.fetcher
+
+
+FetcherDep = Annotated[Fetcher, Depends(get_fetcher)]
+
+
+class FetchSummary(BaseModel):
+    new: int
+    duplicates: int
+    too_short: int
+    filtered: int
 
 
 class SourceOut(BaseModel):
@@ -135,6 +151,20 @@ def update_source(source_id: int, body: SourceUpdate, session: SessionDep) -> So
         raise HTTPException(status_code=422, detail={"errors": ["rss_url: an active source needs an RSS feed URL"]})
     session.commit()
     return source
+
+
+@router.post("/{source_id}/fetch", response_model=FetchSummary)
+def fetch_source(source_id: int, session: SessionDep, fetcher: FetcherDep) -> dict[str, int]:
+    """Fetch the feed now (works for inactive sources too, as a manual check)."""
+    source = session.get(Source, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail={"errors": [f"Source {source_id} not found."]})
+    if not source.rss_url:
+        raise HTTPException(status_code=422, detail={"errors": ["rss_url: this source has no RSS feed to fetch"]})
+    try:
+        return ingest_source(session, source, fetcher).as_dict()
+    except SourceFetchFailed as error:
+        raise HTTPException(status_code=502, detail={"errors": [str(error)]})
 
 
 def violated_constraint(error: IntegrityError) -> str | None:

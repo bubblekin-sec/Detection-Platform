@@ -1,11 +1,35 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: increments 1 and 2a done. Increment 2b (UI scaffold) is next.
+Status: increments 1, 2a, 2b and 3 done. Increment 4 (profiles, runs, worker, relevance) is next.
+
+**3 notes (fetch now → articles).**
+- **Live check, 2026-11-21:** all 28 active seed sources fetched, giving about 750 articles. Only about 20 items were too short.
+  - Two upstream feed URLs had moved. They are corrected in `SEED_FIXES` (`app/sources/seed.py`); the vendored YAML stays verbatim.
+  - Summary-only feeds are handled with a plain article-page fetch, using the source's `extract.body_selectors`. The first selector whose text reaches `min_content_length` wins, because early generic selectors like `main` can match only a teaser. No Playwright is needed so far.
+- **Per-fetch work is bounded** to the newest `max_items_per_fetch` items (default 50). Huntress returns its whole ~760-item archive.
+- **Text is block-aware:** inline `<code>`, `<em>` and `<a>` stay inside their sentence. This keeps command lines intact for extraction in increment 5.
+- **Dedup:** by canonical URL (fragment and tracking parameters removed), then by content hash. Both have unique constraints, and inserts use `ON CONFLICT DO NOTHING`. US-CERT items are correctly caught as copies of CISA posts.
+- **Fetch failures** (HTTP status, not-a-feed, blocked destination) return 502 and set `source.last_error`. A failure on a single article page only counts that item as too short.
+- **Hardening from review:**
+  - **No transaction or row lock is held during network I/O.** Ingest runs in phases: read, then network, then a short write.
+  - **One bad item never fails a fetch.** Malformed links are counted as filtered. NUL bytes are stripped. Each insert runs in a savepoint.
+  - **The fetcher has an overall deadline** (2 × timeout), so slow-drip servers cannot hold a fetch open. It also has a 5 MB cap for article pages, separate from the 20 MB cap for feeds, and blocks NAT64, IPv4-compatible and site-local IPv6 addresses.
+  - **HTML-to-text is a single linear walk.** A hostile 200k-element page takes about 3 s instead of hanging.
+  - **Future publish dates are clamped to fetch time.**
+- **`SEED_FIXES` only reaches databases seeded after it was added**, because seeding never updates rows. Older installs should edit those two sources in the UI.
+- **Proxy note for the enterprise:** the SSRF guard resolves DNS locally even when `HTTPS_PROXY` is set. A container that can only resolve names through its proxy will fail every fetch with "Could not resolve". If the target environment works that way, add a setting that skips local resolution when a proxy is configured, and rely on proxy egress allow-listing as the control. Run `check-portability` on this at handoff.
+- **Portability:**
+  - Outbound HTTP honours `HTTPS_PROXY`/`NO_PROXY` (`trust_env`).
+  - The SSRF guard refuses non-public addresses on every hop. DNS rebinding between the check and connect remains possible, so enterprise egress policy is the backstop.
+  - Fetching is manual (API button or CLI). A scheduled Container Apps job running `python -m app.cli fetch --all-active` is the planned automation.
+  - The SPA uses history routes (`/articles/:id`), so nginx in increment 9 needs `try_files $uri /index.html`.
+
+**2b notes.** `PATCH /api/sources/{id}` and the Sources page (list, add, inline edit, active toggle). Migration 0002 enforces in the database that an active source has an RSS feed.
 
 **2a notes.**
 - Huntable `sources.yaml` is pinned at `904a6c4`: 38 sources, 28 seeded active (upstream active and has an RSS feed). The rest start inactive, with `config.upstream_active` recording the upstream flag.
 - Seeding only inserts missing slugs and never updates a row, so upstream changes reach existing installs only through a deliberate migration or by editing them.
-- `POST /api/sources` creates RSS sources and returns 409 when the name's slug is already taken. Editing a source (PATCH) is not built yet.
+- `POST /api/sources` creates RSS sources and returns 409 when the name's slug is already taken.
 - **Portability:**
   - `DATABASE_URL` is the only DB setting. On Azure it comes from a Container Apps secret reference, with `sslmode=require` for Azure Database for PostgreSQL; Entra token auth comes later.
   - Run `alembic upgrade head` and `python -m app.cli seed-sources` as a Container Apps job using the same image, not at API startup.
@@ -20,6 +44,9 @@ Reference design: [Huntable-CTI-Studio](https://github.com/dfirtnt/Huntable-CTI-
 | Output | Sigma rules + KQL for **Microsoft Defender XDR Advanced Hunting** (Device* tables) from day one |
 | KQL approach | Sigma is the rule of record. Each rule has one or more **query artifacts** per target (`defender_xdr`), each tagged with an `origin`: `converted` (pySigma Kusto backend + Microsoft XDR pipeline, deterministic), `llm` (LLM-written from the Sigma and evidence), or `human_edit`. A per-profile `query_strategy` chooses `converted`, `llm`, `converted_with_llm_fallback` (default: the LLM writes KQL only when conversion fails, e.g. DNS, service install, scheduled task) or `both` (shown side by side). LLM KQL is checked against the Defender XDR table and column catalog before review. A syntax check against real Defender is done only at enterprise handoff. |
 | LLM | One `LLMClient` interface, chosen by settings. Anthropic first; an approved enterprise provider (e.g. Azure OpenAI) later. Tests never call a real LLM. |
+| Models (decided 2026-11-21) | **Relevance: `claude-haiku-5-5`** (cheap triage, about $1 per 750 articles). **Extraction and rule generation: `claude-opus-5-5`.** Each stage's model is a setting, so it can change without code. JSON comes back through structured outputs (`messages.parse` with pydantic). Opus calls use server-side refusal fallbacks, since threat content can trip cyber safety classifiers. |
+| Run trigger | **Manual.** "Run detection" on an article, or a CLI batch. Nothing runs automatically after a fetch, so spend happens only on request. |
+| Credentials | The user puts `ANTHROPIC_API_KEY` in `api/.env` (gitignored). The app never logs it. The test suite forces the fake LLM. |
 | MVP scope | Ingest → junk filter → relevance → extraction → Sigma + KQL → human review → YAML export |
 | Rule destination | Stays in the platform (approve / reject / edit, then export). No GitHub or SIEM push yet. |
 | Flexibility | Pipeline is driven by **profiles**: plain-language forms compiled into prompts. Detection is the first profile. The editor UI and other teams' profiles come later. |

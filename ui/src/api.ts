@@ -28,6 +28,29 @@ export type SourceUpdate = Partial<{
   active: boolean
 }>
 
+export interface FetchSummary {
+  new: number
+  duplicates: number
+  too_short: number
+  filtered: number
+}
+
+export interface ArticleSummary {
+  id: number
+  url: string
+  title: string
+  author: string | null
+  published_at: string | null
+  fetched_at: string
+  word_count: number
+  excerpt: string
+  source: { id: number; slug: string; name: string }
+}
+
+export interface ArticleDetail extends ArticleSummary {
+  content_text: string
+}
+
 /** The API returns every 4xx as {"detail": {"errors": ["field: message" | "message"]}}. */
 export class ApiError extends Error {
   readonly status: number
@@ -78,3 +101,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const listSources = () => request<Source[]>('GET', '/api/sources')
 export const createSource = (body: SourceCreate) => request<Source>('POST', '/api/sources', body)
 export const updateSource = (id: number, body: SourceUpdate) => request<Source>('PATCH', `/api/sources/${id}`, body)
+export const fetchSourceNow = (id: number) => request<FetchSummary>('POST', `/api/sources/${id}/fetch`)
+export const listArticles = (sourceId?: number) =>
+  request<ArticleSummary[]>('GET', sourceId === undefined ? '/api/articles' : `/api/articles?source_id=${sourceId}`)
+export const getArticle = (id: number) => request<ArticleDetail>('GET', `/api/articles/${id}`)

@@ -279,3 +279,12 @@ def test_create_still_ignores_unknown_fields(db_client, db_session):
 
     assert response.status_code == 201
     assert response.json()["active"] is True
+
+
+def test_seed_applies_documented_url_fixes_on_top_of_the_vendored_list(db_session):
+    seed_sources(db_session)
+
+    assert by_slug(db_session, "elastic_security_labs").rss_url == "https://www.elastic.co/security-labs/rss/feed.xml"
+    sekoia = by_slug(db_session, "sekoia_io_blog")
+    assert (sekoia.url, sekoia.rss_url) == ("https://www.sekoia.com/blog", "https://www.sekoia.com/blog/rss.xml")
+    assert by_slug(db_session, "cisco_talos").rss_url.startswith("https://blog.talosintelligence.com")

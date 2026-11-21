@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic feed for tests. All content is invented. -->
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Example Threat Research</title>
+    <link>https://research.example.com/</link>
+    <description>Synthetic research feed</description>
+    <item>
+      <title>Operation Paper Lantern: rundll32 and scheduled task persistence</title>
+      <link>https://research.example.com/2026/11/paper-lantern?utm_source=rss&amp;utm_medium=feed#top</link>
+      <dc:creator>Research Team</dc:creator>
+      <pubDate>Tue, 17 Nov 2026 09:00:00 GMT</pubDate>
+      <description>Short teaser for Paper Lantern.</description>
+      <content:encoded><![CDATA[
+        <p>The operators executed <code>rundll32.exe javascript:"\..\mshtml,RunHTMLApplication"</code> to launch a script loader.</p>
+        <p>Persistence was created with <code>schtasks /create /tn Updater /tr C:\Users\Public\u.exe /sc onlogon</code>.</p>
+        <p>A Run key value was written: <code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Updater</code> pointing to the same binary.</p>
+        <script>alert('ignored');</script>
+        <p>The loader beaconed to update-check.example.net over HTTPS every 300 seconds, using a fixed user agent string.
+        Analysts observed the parent process chain winword.exe, then cmd.exe, then rundll32.exe on three hosts.
+        This paragraph exists so the synthetic article is long enough to pass the default minimum content length
+        used by the junk filter, which mirrors how real research posts are much longer than feed teasers.</p>
+      ]]></content:encoded>
+    </item>
+    <item>
+      <title>Teaser only: Quiet Heron loader analysis</title>
+      <link>https://research.example.com/2026/11/quiet-heron</link>
+      <pubDate>Mon, 16 Nov 2026 12:00:00 GMT</pubDate>
+      <description>Read our full analysis of the Quiet Heron loader.</description>
+    </item>
+    <item>
+      <title>Join our webinar: detection engineering 101</title>
+      <link>https://research.example.com/events/webinar-101</link>
+      <pubDate>Sun, 15 Nov 2026 12:00:00 GMT</pubDate>
+      <description>Register now for our webinar on detection engineering, with live demos and a long description that would otherwise pass the length check because it keeps going and going for quite a while, well past any minimum, so only the title keyword filter can catch it as junk content for this source.</description>
+    </item>
+    <item>
+      <title>No link item</title>
+      <description>Items without a link are skipped.</description>
+    </item>
+  </channel>
+</rss>

@@ -282,6 +282,81 @@ describe('SourcesPage', () => {
     expect(edit).toHaveAttribute('aria-expanded', 'true')
   })
 
+  it('fetches a source now and reports what was stored', async () => {
+    let fetched = false
+    const api = fakeApi({
+      'GET /api/sources': () => ({ status: 200, body: [{ ...talos, last_checked_at: fetched ? '2026-11-21T12:00:00Z' : null }] }),
+      'POST /api/sources/1/fetch': () => {
+        fetched = true
+        return { status: 200, body: { new: 3, duplicates: 12, too_short: 1, filtered: 0 } }
+      },
+    })
+    const user = userEvent.setup()
+    render(<SourcesPage />)
+
+    await user.click(await screen.findByRole('button', { name: 'Fetch Cisco Talos now' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Cisco Talos: 3 new, 12 already stored, 1 too short, 0 filtered',
+    )
+    expect(api.calls.map((call) => call.route)).toEqual(['GET /api/sources', 'POST /api/sources/1/fetch', 'GET /api/sources'])
+  })
+
+  it('keeps a source added while the post-fetch refresh is in flight', async () => {
+    let releaseRefresh: () => void = () => {}
+    const refreshGate = new Promise<void>((resolve) => (releaseRefresh = resolve))
+    let getCount = 0
+    const created: Source = { ...talos, id: 3, slug: 'new_blog', name: 'New Blog', origin: 'user' }
+    fakeApi({
+      'GET /api/sources': () => ({ status: 200, body: [talos] }),
+      'POST /api/sources/1/fetch': () => ({ status: 200, body: { new: 0, duplicates: 0, too_short: 0, filtered: 0 } }),
+      'POST /api/sources': () => ({ status: 201, body: created }),
+    })
+    const original = globalThis.fetch
+    globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+      if (String(args[0]) === '/api/sources' && (args[1]?.method ?? 'GET') === 'GET' && ++getCount === 2) await refreshGate
+      return original(...args)
+    }) as typeof fetch
+    const user = userEvent.setup()
+    render(<SourcesPage />)
+
+    await user.click(await screen.findByRole('button', { name: 'Fetch Cisco Talos now' }))
+    await screen.findByRole('status')
+    await submitAddForm(user, { name: 'New Blog', url: 'https://n.example.com', rss: 'https://n.example.com/f' })
+    await screen.findByRole('row', { name: /New Blog/ })
+    releaseRefresh()
+    await refreshGate
+
+    expect(await screen.findByRole('row', { name: /New Blog/ })).toBeInTheDocument()
+  })
+
+  it('reports a failed fetch and shows the source error', async () => {
+    let failed = false
+    fakeApi({
+      'GET /api/sources': () => ({ status: 200, body: [{ ...talos, last_error: failed ? 'Feed returned HTTP 404.' : null }] }),
+      'POST /api/sources/1/fetch': () => {
+        failed = true
+        return { status: 502, body: { detail: { errors: ['Feed returned HTTP 404.'] } } }
+      },
+    })
+    const user = userEvent.setup()
+    render(<SourcesPage />)
+
+    await user.click(await screen.findByRole('button', { name: 'Fetch Cisco Talos now' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Fetch failed for Cisco Talos: Feed returned HTTP 404.')
+    expect(await within(rowFor('Cisco Talos')).findByText(/Feed returned HTTP 404/)).toBeInTheDocument()
+  })
+
+  it('offers no fetch for a source without a feed', async () => {
+    fakeApi({ 'GET /api/sources': () => ({ status: 200, body: [splunk] }) })
+
+    render(<SourcesPage />)
+
+    await screen.findByRole('row', { name: /Splunk Security Blog/ })
+    expect(screen.queryByRole('button', { name: /Fetch Splunk/ })).not.toBeInTheDocument()
+  })
+
   it('cancels an edit without saving', async () => {
     const api = fakeApi({ 'GET /api/sources': () => ({ status: 200, body: [talos] }) })
     const user = userEvent.setup()
