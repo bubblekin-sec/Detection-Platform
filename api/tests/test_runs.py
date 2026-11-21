@@ -84,10 +84,10 @@ def verdict(score: int) -> RelevanceVerdict:
 
 
 def test_seed_profiles_is_idempotent_and_versioned(db_session):
-    assert seed_profiles(db_session) == {"added": 1, "existing": 0}
-    assert seed_profiles(db_session) == {"added": 0, "existing": 1}
+    assert seed_profiles(db_session) == {"added": 1, "upgraded": 0, "existing": 0}
+    assert seed_profiles(db_session) == {"added": 0, "upgraded": 0, "existing": 1}
     version = db_session.scalars(select(ProfileVersion)).one()
-    assert version.version == 1
+    assert version.version == 2
     assert version.definition["min_score"] == 6
     assert db_session.scalar(select(func.count()).select_from(Profile)) == 1
 
@@ -96,7 +96,7 @@ def test_queue_a_run(api, article):
     run = queue_run(api, article)
 
     assert (run["status"], run["article_id"]) == ("queued", article.id)
-    assert run["profile"] == {"slug": "detection", "version": 1}
+    assert run["profile"] == {"slug": "detection", "version": 2}
     assert run["stages"] == []
 
 

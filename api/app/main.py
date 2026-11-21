@@ -9,6 +9,7 @@ from app.config import Settings
 from app.articles.router import router as articles_router
 from app.db import make_engine, make_session_factory
 from app.detection.router import router as detection_router
+from app.profiles.router import router as profiles_router
 from app.rules.router import router as rules_router
 from app.runs.router import router as runs_router
 from app.sources.fetch import Fetcher, build_fetcher
@@ -40,6 +41,7 @@ def create_app(settings: Settings | None = None, *, fetcher: Fetcher | None = No
     settings = settings or Settings()
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     # Creating the engine does not connect; the first request that needs the database does.
+    app.state.settings = settings
     app.state.engine = make_engine(settings)
     app.state.session_factory = make_session_factory(app.state.engine)
     app.state.fetcher = fetcher or build_fetcher(settings)
@@ -54,6 +56,7 @@ def create_app(settings: Settings | None = None, *, fetcher: Fetcher | None = No
     app.include_router(articles_router)
     app.include_router(runs_router)
     app.include_router(rules_router)
+    app.include_router(profiles_router)
     return app
 
 

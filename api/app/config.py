@@ -32,5 +32,7 @@ class Settings(BaseSettings):
     max_rule_groups_per_run: int = 6  # bounds Opus calls per article
 
     worker_poll_seconds: float = 2
+    # Most articles the priority gate may auto-queue per UTC day (highest scores first); 0 turns auto-queueing off.
+    auto_queue_max_per_day: int = 25
     # A running run with no progress for this long is failed so it can be re-queued (must exceed one LLM call: timeout x (retries + 1)).
     run_stale_after_seconds: int = 1800

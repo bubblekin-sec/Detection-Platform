@@ -61,6 +61,7 @@ class Article(Base):
 
 JSONType = JSON().with_variant(JSONB(), "postgresql")
 RUN_STATUSES = ("queued", "running", "filtered_out", "succeeded", "failed")
+RUN_TRIGGERS = ("manual", "batch", "auto")
 ACTIVE_RUN_CONSTRAINT = "uq_pipeline_runs_one_active"
 
 
@@ -95,6 +96,7 @@ class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
     __table_args__ = (
         CheckConstraint(f"status IN {RUN_STATUSES}", name="ck_pipeline_runs_status"),
+        CheckConstraint(f"trigger IN {RUN_TRIGGERS}", name="ck_pipeline_runs_trigger"),
         # At most one queued/running run per article and profile version.
         Index(
             ACTIVE_RUN_CONSTRAINT, "article_id", "profile_version_id", unique=True,
@@ -107,6 +109,8 @@ class PipelineRun(Base):
     article_id: Mapped[int] = mapped_column(ForeignKey("articles.id"), index=True)
     profile_version_id: Mapped[int] = mapped_column(ForeignKey("profile_versions.id"))
     status: Mapped[str] = mapped_column(String(20), index=True)
+    # manual: UI click; batch: CLI queue-runs; auto: priority gate at fetch time (counts toward the daily cap).
+    trigger: Mapped[str] = mapped_column(String(10), default="manual", server_default="manual")
     current_step: Mapped[str | None] = mapped_column(String(50))
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -197,3 +201,21 @@ class RuleQuery(Base):
     source_sigma_hash: Mapped[str] = mapped_column(String(64))  # stale when it differs from the rule's sigma_hash
     llm_model: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ArticleScore(Base):
+    """Priority score of one article under one profile version (keyword lists belong to the profile)."""
+
+    __tablename__ = "article_scores"
+    __table_args__ = (
+        UniqueConstraint("article_id", "profile_version_id", name="uq_article_scores_article_version"),
+        Index("ix_article_scores_version_score", "profile_version_id", text("score DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id", ondelete="CASCADE"))
+    profile_version_id: Mapped[int] = mapped_column(ForeignKey("profile_versions.id"))
+    score: Mapped[float] = mapped_column()
+    breakdown: Mapped[dict[str, Any]] = mapped_column(JSONType)  # {bucket: {"terms": [...], "points": float}}
+    scorer: Mapped[str] = mapped_column(String(20))  # algorithm tag, e.g. regex-v1
+    scored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -21,7 +21,8 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 | Fetch feeds | `uv run python -m app.cli fetch --source <slug>` (repeatable) or `--all-active`. Makes real outbound requests; exits 1 if any feed fails | verified |
 | Seed profiles | `uv run python -m app.cli seed-profiles` (adds the `detection` profile v1 if missing) | verified |
 | Priority report | `uv run python -m app.cli priority-report [--drop TERM]` (scores every stored article with the Huntable-seeded keyword lists; writes nothing) | verified |
-| Queue runs (batch) | `uv run python -m app.cli queue-runs [--source <slug>] [--limit 20]` (articles with no run yet) | verified |
+| Score articles | `uv run python -m app.cli score-articles [--profile detection] [--missing]` (stores priority scores for the profile's latest version; never queues runs). API: `POST /api/profiles/{slug}/rescore` | verified |
+| Queue runs (batch) | `uv run python -m app.cli queue-runs [--source <slug>] [--min-priority <score>] [--limit 20]` (articles with no successful run yet; `--min-priority` takes the highest scores first) | verified |
 | Worker | `uv run python -m app.worker` (polls) or `--once` (drains the queue, then exits). Needs `ANTHROPIC_API_KEY` in `api/.env`; `LLM_PROVIDER=offline` runs without a model and fails each stage with an explanation | verified (offline + missing-key paths) |
 | Tests | `uv run pytest` (needs the compose db; migrates and truncates `detection_test`, exits with code 2 if unreachable) | verified |
 | New migration | `uv run alembic revision --autogenerate -m "<change>" --rev-id <NNNN>`, then review the generated file | verified |
@@ -34,6 +35,7 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 - The database engine is built only in `app/db.py` `make_engine()`. Tests use the same function.
 - Seed sources come from the vendored Huntable list. Its provenance and pinned commit are in `THIRD_PARTY_NOTICES.md`. Never edit the vendored YAML; put corrections in `SEED_FIXES` in `app/sources/seed.py`.
 - LLM calls go only through the `LLMClient` interface (`app/llm/client.py`), built only by `app/llm/factory.py` `build_llm_client()`, and only the worker builds one. Tests use `tests/fakes.py` `ScriptedLLM` and must never call a real model. Per-stage model settings: `RELEVANCE_MODEL` (default `claude-haiku-5-5`), `EXTRACTION_MODEL` and `RULES_MODEL` (default `claude-opus-5-5`).
+- Priority gate: new articles are scored at fetch time (`app/pipeline/priority.py`, keyword lists from the profile). Those at or above the profile's `priority.threshold` are auto-queued (`trigger=auto`) up to `AUTO_QUEUE_MAX_PER_DAY` (default 25, 0 = off). Below the threshold, no model is ever called unless someone clicks Run detection.
 - Prompts are compiled from profile definitions in `app/profiles/compile.py`. Article text is untrusted: it goes in the user message inside `<article>` tags, and the system prompt says to ignore instructions inside it.
 - All outbound HTTP goes through `app/sources/fetch.py` (SSRF guard: public addresses only, re-checked on each redirect, size cap). It is built only by `build_fetcher(settings)`; tests inject `tests/fakes.py` `FakeFetcher` via `create_app(settings, fetcher=...)`. Tests must never reach the network.
 

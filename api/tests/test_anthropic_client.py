@@ -158,10 +158,10 @@ def test_the_generated_extraction_schema_is_accepted_by_the_sdk_transform():
     import yaml
 
     from app.profiles.schema import ProfileDefinition, extraction_schema
+    from app.profiles.seed import _definition
 
-    definition = ProfileDefinition.model_validate(
-        yaml.safe_load(open("app/profiles/seed_data/detection.yaml", encoding="utf-8"))["definition"]
-    )
+    seed = yaml.safe_load(open("app/profiles/seed_data/detection.yaml", encoding="utf-8"))
+    definition = ProfileDefinition.model_validate(_definition(seed["definition"]))
     schema = anthropic.transform_schema(extraction_schema(definition))
 
     assert schema["additionalProperties"] is False

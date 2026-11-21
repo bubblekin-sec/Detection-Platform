@@ -30,6 +30,9 @@ class FetchSummary(BaseModel):
     duplicates: int
     too_short: int
     filtered: int
+    scored: int
+    auto_queued: int
+    deferred: int
 
 
 class SourceOut(BaseModel):
@@ -154,7 +157,7 @@ def update_source(source_id: int, body: SourceUpdate, session: SessionDep) -> So
 
 
 @router.post("/{source_id}/fetch", response_model=FetchSummary)
-def fetch_source(source_id: int, session: SessionDep, fetcher: FetcherDep) -> dict[str, int]:
+def fetch_source(source_id: int, session: SessionDep, fetcher: FetcherDep, request: Request) -> dict[str, int]:
     """Fetch the feed now (works for inactive sources too, as a manual check)."""
     source = session.get(Source, source_id)
     if source is None:
@@ -162,7 +165,7 @@ def fetch_source(source_id: int, session: SessionDep, fetcher: FetcherDep) -> di
     if not source.rss_url:
         raise HTTPException(status_code=422, detail={"errors": ["rss_url: this source has no RSS feed to fetch"]})
     try:
-        return ingest_source(session, source, fetcher).as_dict()
+        return ingest_source(session, source, fetcher, settings=request.app.state.settings).as_dict()
     except SourceFetchFailed as error:
         raise HTTPException(status_code=502, detail={"errors": [str(error)]})
 

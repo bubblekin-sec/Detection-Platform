@@ -1,6 +1,12 @@
 # Plan: priority scoring, gated model use, workbench UI, then 6b
 
-Status: P1 done, P2 next.
+Status: P1–P4 done (P4 to be reviewed with P5/P6), P5 next.
+
+**P2/P3 notes.**
+- Detection profile v2 (`detection.yaml` `version: 2`) expands `priority: {source: huntable_keyword_registry, threshold: 37.5}` into concrete lists at seed time, so the stored version is self-contained. Seeding adds a higher seed version beside existing ones and never edits them.
+- Dev DB: v2 was added beside v1. `score-articles` scored 715 articles in 7.3 s, so the rescore endpoint stays synchronous. 109 articles are at or above 37.5.
+- Fetch summaries now include `scored`, `auto_queued` and `deferred`. Scoring and gating failures are logged and never fail the fetch.
+- The existing ~109 above-threshold articles were not auto-queued, because rescoring never queues. To process that backlog deliberately: `queue-runs --min-priority 37.5 --limit N`.
 
 **P1 measurement (2026-11-21, 715 real articles, 8 ms per article).**
 - **Distribution:** mean 12.9, median 3.7, p90 52.5, max 92.8. Bands: Excellent 27, Good 33, Fair 42, Poor 8, Very Poor 605 (85%).

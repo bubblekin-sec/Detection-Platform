@@ -1,6 +1,8 @@
-# Detection engineering profile, version 1. Seeded by `python -m app.cli seed-profiles`.
+# Detection engineering profile. Seeded by `python -m app.cli seed-profiles`.
+# v2: adds priority scoring (keyword lists from the vendored Huntable registry, threshold measured on real articles).
 # Editing this file does not change an existing database; new versions are created through the profile editor (later).
 slug: detection
+version: 2
 name: Detection engineering
 description: Turns threat intelligence into Sigma rules and Defender XDR queries.
 definition:
@@ -18,6 +20,10 @@ definition:
   min_score: 6
   output_kind: sigma_kql
   query_strategy: converted_with_llm_fallback
+  # Articles scoring at least the threshold are auto-queued for the model pipeline (see docs/plans/priority-and-workbench.md, P1).
+  priority:
+    source: huntable_keyword_registry
+    threshold: 37.5
   extract_fields:
     - name: cmdline
       description: Full command lines the attacker ran, exactly as written in the article.

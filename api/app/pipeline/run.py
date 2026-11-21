@@ -47,7 +47,9 @@ def find_active_run(session: Session, article_id: int, profile_version_id: int) 
     ).first()
 
 
-def queue_run(session: Session, article_id: int, version: ProfileVersion) -> tuple[PipelineRun, bool]:
+def queue_run(
+    session: Session, article_id: int, version: ProfileVersion, *, trigger: str = "manual"
+) -> tuple[PipelineRun, bool]:
     """Queue a run, or return the one already queued/running for this article and profile version.
 
     A partial unique index allows only one active run per article and version, so concurrent requests
@@ -56,7 +58,7 @@ def queue_run(session: Session, article_id: int, version: ProfileVersion) -> tup
     existing = find_active_run(session, article_id, version.id)
     if existing:
         return existing, False
-    run = PipelineRun(article_id=article_id, profile_version_id=version.id, status="queued")
+    run = PipelineRun(article_id=article_id, profile_version_id=version.id, status="queued", trigger=trigger)
     session.add(run)
     try:
         session.commit()
@@ -83,7 +85,8 @@ def claim_next_run(session: Session, now: datetime) -> int | None:
     run = session.scalars(
         select(PipelineRun)
         .where(PipelineRun.status == "queued")
-        .order_by(PipelineRun.id)
+        # A reviewer's click is never stuck behind an automatic backlog: manual runs first, then oldest.
+        .order_by(PipelineRun.trigger != "manual", PipelineRun.id)
         .limit(1)
         .with_for_update(skip_locked=True)
     ).first()

@@ -9,8 +9,9 @@ The work runs in phases so no database transaction (or row lock) is held during 
 """
 
 import hashlib
+import logging
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -21,9 +22,14 @@ from sqlalchemy.orm import Session
 
 from app.models import Article, Source
 from app.pipeline.junk import DEFAULT_MIN_CONTENT_LENGTH, junk_reason
+from app.config import Settings
+from app.pipeline.auto_queue import auto_queue
+from app.pipeline.scoring import score_articles
+from app.profiles.seed import scoring_versions
 from app.sources.fetch import FetchError, Fetcher
 from app.sources.rss import FeedEntry, FeedParseError, canonical_url, html_to_text, parse_feed
 
+log = logging.getLogger(__name__)
 MAX_URL_LENGTH = 2048
 DEFAULT_MAX_ITEMS_PER_FETCH = 50
 # Article pages only need their text; the larger fetcher default exists for full-content feeds.
@@ -40,9 +46,13 @@ class IngestResult:
     duplicates: int = 0
     too_short: int = 0
     filtered: int = 0  # title keywords, lookback window, unusable URL, beyond max_items_per_fetch, unstorable
+    scored: int = 0  # new articles given a priority score (summed over profiles that define scoring)
+    auto_queued: int = 0  # runs queued by the priority gate (one per article and scoring profile)
+    deferred: int = 0  # above the threshold but over the daily cap: not queued (use "Run detection" or queue-runs)
+    new_ids: list[int] = field(default_factory=list, repr=False)
 
     def as_dict(self) -> dict[str, int]:
-        return asdict(self)
+        return {key: value for key, value in asdict(self).items() if key != "new_ids"}
 
 
 @dataclass(frozen=True)
@@ -51,7 +61,9 @@ class _Candidate:
     url: str
 
 
-def ingest_source(session: Session, source: Source, fetcher: Fetcher, *, now: datetime | None = None) -> IngestResult:
+def ingest_source(
+    session: Session, source: Source, fetcher: Fetcher, *, settings: Settings, now: datetime | None = None
+) -> IngestResult:
     """Fetch the feed and insert new articles. On a feed-level failure, records last_error and raises.
 
     Ends any transaction already open on `session` before network I/O (unflushed changes are discarded).
@@ -95,8 +107,35 @@ def ingest_source(session: Session, source: Source, fetcher: Fetcher, *, now: da
             result.duplicates += 1  # same content under another URL, or a concurrent fetch got there first
         else:
             result.new += 1
+            result.new_ids.append(inserted)
     _record_check(session, source_id, now, error=None)
+    _score_and_gate_new_articles(session, result, settings)
     return result
+
+
+def _score_and_gate_new_articles(session: Session, result: IngestResult, settings: Settings) -> None:
+    """Free priority scoring for freshly inserted articles, then the gate that auto-queues those above the threshold.
+
+    Never fails the fetch, and each profile is scored independently. If scoring or the gate fails, the articles stay
+    stored; recover with `cli score-articles --missing` (unscored) and `cli queue-runs --min-priority <threshold>`
+    (scored but never queued).
+    """
+    if not result.new_ids:
+        return
+    for version in scoring_versions(session):
+        try:
+            result.scored += score_articles(session, version, article_ids=result.new_ids)
+        except Exception:  # one profile's scoring bug must not stop the others or lose stored articles
+            session.rollback()
+            log.exception("Priority scoring failed for profile version %s", version.id)
+    try:
+        gated = auto_queue(session, result.new_ids, settings)
+        result.auto_queued, result.deferred = gated.queued, gated.deferred
+    except Exception:
+        session.rollback()
+        log.exception(
+            "Auto-queue failed for %d new article(s); queue them with `cli queue-runs --min-priority`", len(result.new_ids)
+        )
 
 
 def _read_feed(fetcher: Fetcher, url: str) -> list[FeedEntry]:

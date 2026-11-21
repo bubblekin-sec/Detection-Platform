@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 
 import pytest
+
+from app.config import Settings
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
@@ -61,7 +63,7 @@ def test_fetch_now_stores_full_articles_and_filters_junk(ingest_client, db_sessi
     response = ingest_client.post(f"/api/sources/{source.id}/fetch")
 
     assert response.status_code == 200
-    assert response.json() == {"new": 2, "duplicates": 0, "too_short": 0, "filtered": 1}
+    assert response.json() == {"new": 2, "duplicates": 0, "too_short": 0, "filtered": 1, "scored": 0, "auto_queued": 0, "deferred": 0}
     # The teaser-only item's page was fetched; the long item's page was not.
     assert fake_fetcher.requested == [FEED_URL, HERON_URL]
 
@@ -88,7 +90,7 @@ def test_fetching_again_reports_duplicates(ingest_client, db_session, fake_fetch
 
     response = ingest_client.post(f"/api/sources/{source.id}/fetch")
 
-    assert response.json() == {"new": 0, "duplicates": 2, "too_short": 0, "filtered": 1}
+    assert response.json() == {"new": 0, "duplicates": 2, "too_short": 0, "filtered": 1, "scored": 0, "auto_queued": 0, "deferred": 0}
     assert article_count(db_session) == 2
     assert fake_fetcher.requested[-1:] == [FEED_URL]  # known URLs never trigger a page fetch
 
@@ -98,7 +100,7 @@ def test_rss_only_source_does_not_fetch_pages_and_counts_teasers_as_too_short(in
 
     response = ingest_client.post(f"/api/sources/{source.id}/fetch")
 
-    assert response.json() == {"new": 1, "duplicates": 0, "too_short": 1, "filtered": 1}
+    assert response.json() == {"new": 1, "duplicates": 0, "too_short": 1, "filtered": 1, "scored": 0, "auto_queued": 0, "deferred": 0}
     assert fake_fetcher.requested == [FEED_URL]
 
 
@@ -125,7 +127,7 @@ def test_same_content_under_a_different_url_is_a_duplicate(ingest_client, db_ses
     response = ingest_client.post(f"/api/sources/{mirror.id}/fetch")
 
     # Lantern: new URL, same text (content hash). Heron: same URL as the first source.
-    assert response.json() == {"new": 0, "duplicates": 2, "too_short": 0, "filtered": 1}
+    assert response.json() == {"new": 0, "duplicates": 2, "too_short": 0, "filtered": 1, "scored": 0, "auto_queued": 0, "deferred": 0}
     assert article_count(db_session) == 2
 
 
@@ -188,7 +190,7 @@ def test_lookback_days_skips_older_items(db_session, fake_fetcher):
     source = add_source(db_session, config=RESEARCH_CONFIG | {"lookback_days": 1})
 
     # Cutoff is Nov 17 08:00: Lantern (Nov 17 09:00) is inside it; Heron (Nov 16) and the webinar (Nov 15) are not.
-    result = ingest_source(db_session, source, fake_fetcher, now=datetime(2026, 11, 18, 8, 0, tzinfo=UTC))
+    result = ingest_source(db_session, source, fake_fetcher, settings=Settings(_env_file=None), now=datetime(2026, 11, 18, 8, 0, tzinfo=UTC))
 
     assert (result.new, result.filtered) == (1, 2)
     assert fake_fetcher.requested == [FEED_URL]
@@ -213,7 +215,7 @@ def test_only_the_newest_items_are_processed_per_fetch(ingest_client, db_session
     response = ingest_client.post(f"/api/sources/{source.id}/fetch")
 
     # Three items have links; only the newest (Paper Lantern, Nov 17) is processed. The link-less item never counts.
-    assert response.json() == {"new": 1, "duplicates": 0, "too_short": 0, "filtered": 2}
+    assert response.json() == {"new": 1, "duplicates": 0, "too_short": 0, "filtered": 2, "scored": 0, "auto_queued": 0, "deferred": 0}
     assert fake_fetcher.requested == [FEED_URL]
 
 
@@ -228,7 +230,7 @@ def test_a_malformed_item_link_is_skipped_not_fatal(ingest_client, db_session, f
     response = ingest_client.post(f"/api/sources/{source.id}/fetch")
 
     assert response.status_code == 200
-    assert response.json() == {"new": 2, "duplicates": 0, "too_short": 0, "filtered": 1}
+    assert response.json() == {"new": 2, "duplicates": 0, "too_short": 0, "filtered": 1, "scored": 0, "auto_queued": 0, "deferred": 0}
 
 
 def test_nul_bytes_in_a_page_are_stripped(ingest_client, db_session, fake_fetcher):
@@ -270,7 +272,7 @@ def test_future_publication_dates_are_clamped_to_fetch_time(db_session, fake_fet
     source = add_source(db_session)
     now = datetime(2026, 11, 21, 12, 0, tzinfo=UTC)
 
-    ingest_source(db_session, source, fake_fetcher, now=now)
+    ingest_source(db_session, source, fake_fetcher, settings=Settings(_env_file=None), now=now)
 
     lantern = db_session.scalars(select(Article).where(Article.url == LANTERN_URL)).one()
     assert lantern.published_at == now
