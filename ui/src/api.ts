@@ -188,4 +188,31 @@ export const queueRun = (articleId: number, profile = 'detection') =>
   request<PipelineRun>('POST', `/api/articles/${articleId}/runs`, { profile })
 export const getRun = (id: number) => request<PipelineRun>('GET', `/api/runs/${id}`)
 export const listRules = (status: DetectionRule['status']) => request<RuleDetail[]>('GET', `/api/rules?status=${status}`)
+export const getRuleCounts = () => request<Record<DetectionRule['status'], number>>('GET', '/api/rules/counts')
+export const getDashboard = () => request<Dashboard>('GET', '/api/dashboard')
+
+export type PipelineState = 'not_run' | 'in_progress' | 'filtered' | 'failed' | 'no_rules' | 'rules'
+
+export interface Dashboard {
+  profile: { slug: string; version: number } | null // null before any profile is seeded
+  funnel: {
+    fetched: number
+    above_threshold: number
+    run: number
+    relevant: number
+    with_rules: number
+    approved: number
+    threshold: number | null
+  }
+  volume: { date: string; articles: number }[]
+  bands: Record<string, number>
+  top: { id: number; title: string; source: string; score: number; band: string; pipeline: PipelineState }[]
+  failing_sources: { id: number; name: string; last_error: string; last_checked_at: string | null }[]
+  spend: {
+    total: number
+    by_model: { model: string; input_tokens: number; output_tokens: number; cache_read_tokens: number; cost: number | null }[]
+    by_stage: Record<string, number>
+    unpriced_models: string[]
+  }
+}
 export const updateRule = (id: string, body: RuleUpdate) => request<RuleDetail>('PATCH', `/api/rules/${id}`, body)

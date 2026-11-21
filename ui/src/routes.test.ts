@@ -4,7 +4,8 @@ import { normalize, route } from './routes'
 
 describe('route', () => {
   it.each([
-    ['/', { page: 'sources' }],
+    ['/', { page: 'dashboard' }],
+    ['/sources', { page: 'sources' }],
     ['/articles', { page: 'articles' }],
     ['/articles/42', { page: 'article', id: 42 }],
     ['/review', { page: 'review' }],

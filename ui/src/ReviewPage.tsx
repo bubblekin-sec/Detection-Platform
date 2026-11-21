@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 
 import { ApiError, describeError, listRules, updateRule, type DetectionRule, type RuleDetail, type RuleUpdate } from './api'
 import { RuleCard } from './RuleCard'
+import { followLink } from './routes'
 
 type Status = DetectionRule['status']
 
@@ -11,7 +12,13 @@ const FILTERS: { status: Status; label: string; empty: string }[] = [
   { status: 'rejected', label: 'Rejected', empty: 'No rejected rules.' },
 ]
 
-export function ReviewPage({ onOpenArticle }: { onOpenArticle: (id: number) => void }) {
+export function ReviewPage({
+  onOpenArticle,
+  onRulesChanged = () => {},
+}: {
+  onOpenArticle: (id: number) => void
+  onRulesChanged?: () => void // e.g. so the sidebar's pending count follows decisions made here
+}) {
   const [status, setStatus] = useState<Status>('pending_review')
   const [rules, setRules] = useState<RuleDetail[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -95,7 +102,10 @@ export function ReviewPage({ onOpenArticle }: { onOpenArticle: (id: number) => v
         <ReviewItem
           key={rule.id}
           rule={rule}
-          onUpdated={(updated) => applyUpdate(updated, status)}
+          onUpdated={(updated) => {
+            onRulesChanged()
+            applyUpdate(updated, status)
+          }}
           onOpenArticle={onOpenArticle}
         />
       ))}
@@ -164,8 +174,7 @@ function ReviewItem({
   }
 
   function followArticle(event: MouseEvent<HTMLAnchorElement>) {
-    event.preventDefault()
-    onOpenArticle(rule.article.id)
+    followLink(event, () => onOpenArticle(rule.article.id))
   }
 
   const header = (

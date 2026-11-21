@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent } from 'react'
 
 import { describeError, getArticle, listArticles, listSources, type ArticleDetail, type ArticleSummary, type Source } from './api'
+import { followLink } from './routes'
 import { RunPanel } from './RunPanel'
 
 const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -51,9 +52,8 @@ export function ArticlesPage({ onOpen }: { onOpen: (id: number) => void }) {
     }
   }, [sourceId])
 
-  function open(event: MouseEvent, id: number) {
-    event.preventDefault()
-    onOpen(id)
+  function open(event: MouseEvent<HTMLAnchorElement>, id: number) {
+    followLink(event, () => onOpen(id))
   }
 
   return (
