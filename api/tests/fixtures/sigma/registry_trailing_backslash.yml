@@ -1,0 +1,12 @@
+title: Run Key Contains With Trailing Backslash
+id: 5c4b3a29-1807-4f6e-9d5c-4b3a29180716
+status: experimental
+description: Synthetic test rule. SigmaHQ commonly writes registry paths with a trailing backslash.
+logsource:
+  category: registry_set
+  product: windows
+detection:
+  selection:
+    TargetObject|contains: '\CurrentVersion\Run\'
+  condition: selection
+level: low

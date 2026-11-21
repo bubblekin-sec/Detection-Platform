@@ -1,0 +1,25 @@
+[project]
+name = "detection-api"
+version = "0.1.0"
+description = "Detection Platform API: threat intel to detection pipeline"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.165.0",
+    "pydantic-settings>=2.16.3",
+    "pysigma>=1.5,<2",
+    "pysigma-backend-kusto>=1.0.1,<2",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.2.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

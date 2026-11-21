@@ -1,0 +1,15 @@
+title: Rundll32 Executing JavaScript via mshtml
+id: 6f1d0b8e-3c1a-4b8e-9a6e-1f2a3b4c5d6e
+status: experimental
+description: Synthetic test rule. Rundll32 used to run JavaScript through mshtml RunHTMLApplication.
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: '\rundll32.exe'
+    CommandLine|contains|all:
+      - 'javascript:'
+      - 'RunHTMLApplication'
+  condition: selection
+level: high

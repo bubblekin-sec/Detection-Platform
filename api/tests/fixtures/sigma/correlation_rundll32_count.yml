@@ -1,0 +1,12 @@
+title: Repeated Rundll32 JavaScript
+id: 2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901
+description: Synthetic correlation over process_creation_rundll32.yml.
+correlation:
+  type: event_count
+  rules:
+    - 6f1d0b8e-3c1a-4b8e-9a6e-1f2a3b4c5d6e
+  group-by:
+    - Computer
+  timespan: 5m
+  condition:
+    gte: 3

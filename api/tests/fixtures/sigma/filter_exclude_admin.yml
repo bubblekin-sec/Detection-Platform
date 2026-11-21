@@ -1,0 +1,12 @@
+title: Exclude Admin User
+id: 7d6c5b4a-3928-4170-8e9d-0c1b2a394857
+description: Synthetic filter for process_creation_rundll32.yml.
+logsource:
+  category: process_creation
+  product: windows
+filter:
+  rules:
+    - 6f1d0b8e-3c1a-4b8e-9a6e-1f2a3b4c5d6e
+  selection:
+    User: admin
+  condition: not selection

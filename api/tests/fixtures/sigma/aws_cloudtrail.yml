@@ -1,0 +1,12 @@
+title: CloudTrail Logging Stopped
+id: 3e2d1c0b-9a8f-4e7d-8c6b-5a4f3e2d1c0b
+status: experimental
+description: Synthetic test rule for an unsupported Defender XDR logsource.
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventName: StopLogging
+  condition: selection
+level: medium

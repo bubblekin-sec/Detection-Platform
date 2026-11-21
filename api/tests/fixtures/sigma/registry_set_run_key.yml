@@ -1,0 +1,13 @@
+title: Run Key Persistence Pointing to Public Folder
+id: 0a9b8c7d-6e5f-4a3b-8c2d-1e0f9a8b7c6d
+status: experimental
+description: Synthetic test rule. Run key value set to an executable under C:\Users\Public.
+logsource:
+  category: registry_set
+  product: windows
+detection:
+  selection:
+    TargetObject|contains: '\Software\Microsoft\Windows\CurrentVersion\Run\'
+    Details|contains: 'C:\Users\Public\'
+  condition: selection
+level: medium
