@@ -7,6 +7,7 @@ describe('route', () => {
     ['/', { page: 'sources' }],
     ['/articles', { page: 'articles' }],
     ['/articles/42', { page: 'article', id: 42 }],
+    ['/review', { page: 'review' }],
     ['/articles/abc', { page: 'not-found' }],
     ['/articlesX', { page: 'not-found' }],
     ['/nope', { page: 'not-found' }],

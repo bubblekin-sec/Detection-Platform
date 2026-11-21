@@ -94,9 +94,25 @@ export interface DetectionRule {
   group: { platform: string; telemetry_category: string }
   observable_ids: number[]
   sigma_yaml: string
+  sigma_hash: string
   rationale: string | null
   queries: RuleQuery[]
 }
+
+export interface RuleDetail extends DetectionRule {
+  reviewer_note: string | null
+  reviewed_at: string | null
+  created_at: string
+  article: { id: number; title: string; url: string }
+}
+
+export type RuleUpdate = Partial<{
+  status: DetectionRule['status']
+  reviewer_note: string | null
+  sigma_yaml: string
+  kql: string
+  expected_sigma_hash: string
+}>
 
 export interface PipelineRun {
   id: number
@@ -171,3 +187,5 @@ export const listArticleRuns = (articleId: number) => request<PipelineRun[]>('GE
 export const queueRun = (articleId: number, profile = 'detection') =>
   request<PipelineRun>('POST', `/api/articles/${articleId}/runs`, { profile })
 export const getRun = (id: number) => request<PipelineRun>('GET', `/api/runs/${id}`)
+export const listRules = (status: DetectionRule['status']) => request<RuleDetail[]>('GET', `/api/rules?status=${status}`)
+export const updateRule = (id: string, body: RuleUpdate) => request<RuleDetail>('PATCH', `/api/rules/${id}`, body)

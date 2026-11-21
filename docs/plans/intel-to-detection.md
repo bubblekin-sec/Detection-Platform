@@ -1,6 +1,38 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: increments 1 to 6 done. Increment 6b (LLM-written KQL fallback) and 7 (review screen) are next.
+Status: increments 1 to 7 done. Next: 8 (YAML export), then 6b (LLM-written KQL fallback). 7 was built before 6b on purpose: it is deterministic, while 6b adds more model behaviour that has not been checked against a real API yet.
+
+**7 notes (review).**
+- **API:**
+  - `GET /api/rules?status=` (newest first, each rule with its article).
+  - `GET /api/rules/{id}`.
+  - `PATCH /api/rules/{id}` with any of `status`, `reviewer_note`, `sigma_yaml`, `kql`. Partial update; unknown fields and explicit nulls (other than the note) give 422; the row is locked while updating.
+- **Sigma edits:**
+  - The `id` is pinned to the rule's id, and the reviewer's text is otherwise kept as written.
+  - The edit is revalidated: invalid Sigma gives 422 `sigma_yaml: …` and nothing changes.
+  - The `converted` KQL is regenerated. `llm` and `human_edit` artifacts are kept and show as stale.
+  - An edit without an explicit status returns the rule to `pending_review`, because the approved content changed.
+- **KQL edits:** stored as one `human_edit` artifact per target (replaced on re-edit), with lint warnings.
+- **UI `/review`:**
+  - Tabs: Pending, Approved, Rejected.
+  - Each rule card links to its article, with a reviewer note, Approve, Reject, Back to pending, and Edit Sigma / Edit KQL. Validation errors show inline and the editor stays open.
+- **Hardening from review:**
+  - A Sigma edit must keep the rule's id. pySigma merges `action: global` documents, so a multi-document edit is now refused (422), using the same `identity_error` check as rule generation.
+  - The article URL is kept in `references`. Saving unchanged text is a no-op.
+  - Status actions send `expected_sigma_hash` (exposed as `sigma_hash`). A rule changed since it was loaded gives 409, so an approval only ever covers the content the reviewer saw.
+  - A KQL edit also returns an approved rule to review, because that query is what would be deployed.
+  - `sigma_yaml` and `kql` must be non-blank and at most 64 KB in UTF-8 bytes.
+  - UI: the note goes with every status action; action failures are shown on the card; a response that arrives after switching filters is ignored; the filters are toggle buttons (`aria-pressed`), not a half-implemented tab pattern.
+
+**First real run (2026-11-21, 5 articles, about $0.40 in total).**
+- **Relevance (Haiku, about $0.001 per article)** filtered all three non-detection articles: a newsletter (4/10), a compliance piece (1/10) and an AI prompt-injection demo (3/10). It passed a Talos actor report (10/10) and a DFIR Report write-up (6/10).
+- **Extraction (Opus):** 17 and 33 observables, with 3 unverified.
+- **Rule generation (Opus):** 7 rules. Each full run took about 1 minute and cost about $0.20.
+- **Quality:** the rules are specific and sensible. For example, a process rule caught the actor's `Recovery\OEM` path and an en-dash `–f` certutil variant.
+- **Problems found:**
+  1. **3 of the 7 rules are `dns_query`, which has no Defender XDR mapping, so they have no KQL.** This is exactly what increment 6b (LLM-written KQL) is for, so 6b is next.
+  2. **The model still wrote a registry `contains` ending in a backslash**, despite the prompt. The lint flagged both pitfalls, so the reviewer sees them, but the converted query would never match. Follow-up: give the model one automatic repair round using the lint warnings before the rule is saved.
+  3. **Long rules make the review page very long.** Follow-up: collapsible Sigma blocks.
 
 **6 notes (rule generation).**
 - **Grouping:** verified observables only, grouped by `(platform, telemetry_category)` (not `logsource_hint`, which is free text and would fragment groups). Largest groups go first, capped by `MAX_RULE_GROUPS_PER_RUN` (default 6) to bound Opus calls per article.

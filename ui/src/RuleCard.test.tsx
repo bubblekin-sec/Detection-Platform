@@ -12,6 +12,7 @@ const rule: DetectionRule = {
   group: { platform: 'windows', telemetry_category: 'process_creation' },
   observable_ids: [1],
   sigma_yaml: 'title: Scheduled Task Created Pointing to Public Folder\nlevel: high\n',
+  sigma_hash: 'a'.repeat(64),
   rationale: 'Covers the observed task creation.',
   queries: [
     {

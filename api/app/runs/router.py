@@ -66,6 +66,7 @@ class RuleOut(BaseModel):
     group: dict[str, Any]
     observable_ids: list[int]
     sigma_yaml: str
+    sigma_hash: str  # send back as expected_sigma_hash so approvals only apply to what the reviewer saw
     rationale: str | None
     queries: list[QueryOut]
 
@@ -73,7 +74,7 @@ class RuleOut(BaseModel):
 def rule_out(rule: DetectionRule) -> RuleOut:
     return RuleOut(
         id=rule.id, title=rule.title, level=rule.level, status=rule.status, group=rule.group_key,
-        observable_ids=rule.observable_ids, sigma_yaml=rule.sigma_yaml, rationale=rule.rationale,
+        observable_ids=rule.observable_ids, sigma_yaml=rule.sigma_yaml, sigma_hash=rule.sigma_hash, rationale=rule.rationale,
         queries=[
             QueryOut.model_validate(query).model_copy(update={"stale": query.source_sigma_hash != rule.sigma_hash})
             for query in rule.queries

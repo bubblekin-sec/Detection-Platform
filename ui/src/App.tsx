@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent } from 'react'
 
 import { ArticleReader, ArticlesPage } from './ArticlesPage'
+import { ReviewPage } from './ReviewPage'
 import { normalize, route } from './routes'
 import { SourcesPage } from './SourcesPage'
 
@@ -23,6 +24,7 @@ function usePath(): [string, (path: string) => void] {
 const NAV = [
   { href: '/', label: 'Sources', pages: ['sources'] },
   { href: '/articles', label: 'Articles', pages: ['articles', 'article'] },
+  { href: '/review', label: 'Review', pages: ['review'] },
 ]
 
 export function App() {
@@ -58,6 +60,7 @@ export function App() {
         {current.page === 'article' && (
           <ArticleReader key={current.id} id={current.id} onBack={() => navigate('/articles')} />
         )}
+        {current.page === 'review' && <ReviewPage onOpenArticle={(id) => navigate(`/articles/${id}`)} />}
         {current.page === 'not-found' && (
           <section className="page">
             <h1>Page not found</h1>

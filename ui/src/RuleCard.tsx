@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import type { DetectionRule } from './api'
 
 const TARGET_LABELS: Record<string, string> = { defender_xdr: 'Defender XDR KQL' }
@@ -9,7 +11,7 @@ const STATUS_LABELS: Record<DetectionRule['status'], string> = {
 }
 
 /** One generated rule: Sigma of record plus its query artifacts, with conversion errors and lint warnings. */
-export function RuleCard({ rule }: { rule: DetectionRule }) {
+export function RuleCard({ rule, header, children }: { rule: DetectionRule; header?: ReactNode; children?: ReactNode }) {
   return (
     <article className="rule-card" aria-labelledby={`rule-${rule.id}`}>
       <header className="rule-header">
@@ -22,6 +24,7 @@ export function RuleCard({ rule }: { rule: DetectionRule }) {
           </span>
         </p>
       </header>
+      {header}
       {rule.rationale && <p className="muted small">{rule.rationale}</p>}
 
       <figure className="code-figure" aria-labelledby={`sigma-${rule.id}`}>
@@ -57,6 +60,7 @@ export function RuleCard({ rule }: { rule: DetectionRule }) {
           )}
         </section>
       ))}
+      {children}
     </article>
   )
 }

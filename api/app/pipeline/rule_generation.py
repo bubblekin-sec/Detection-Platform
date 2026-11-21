@@ -17,7 +17,7 @@ from typing import Any
 from app.config import Settings
 from app.detection.kql import to_defender_xdr_kql
 from app.detection.lint import lint_kql
-from app.detection.rules import finalize_sigma
+from app.detection.rules import finalize_sigma, identity_error
 from app.detection.sigma import parse_sigma
 from app.llm.client import LLMClient, LLMError, LLMRefusal, LLMUsage
 from app.models import DetectionRule, Observable, RuleQuery
@@ -130,8 +130,8 @@ def _generate_group(llm, settings, result, group, items, outcome, totals, on_pro
         draft = response.output
         sigma = finalize_sigma(draft.sigma_yaml, rule_id=rule_id, reference_url=url, today=today)
         parsed = parse_sigma(sigma)
-        if parsed.rule is not None and str(parsed.rule.id) != rule_id:
-            parsed.errors.append("The rule must be a single YAML document (extra documents or duplicate keys found).")
+        if parsed.rule is not None and (mismatch := identity_error(parsed.rule, rule_id)):
+            parsed.errors.append(mismatch)
         elif parsed.rule is not None:
             outcome |= {"outcome": "created", "rule_id": rule_id, "attempts": attempt}
             return _rule(rule_id, run_id, article_id, group, items, draft, sigma, parsed.rule)
@@ -145,10 +145,10 @@ def _generate_group(llm, settings, result, group, items, outcome, totals, on_pro
     return None
 
 
-def _rule(rule_id, run_id, article_id, group, items, draft: SigmaDraft, sigma: str, parsed_rule) -> DetectionRule:
-    sigma_hash = sigma_digest(sigma)
+def converted_query(parsed_rule, sigma: str, sigma_hash: str) -> RuleQuery:
+    """Deterministic Defender XDR artifact for a validated rule: the KQL or the conversion error, plus lint."""
     converted = to_defender_xdr_kql(parsed_rule)
-    query = RuleQuery(
+    return RuleQuery(
         target="defender_xdr",
         origin="converted",
         query_text=converted.kql,
@@ -157,7 +157,16 @@ def _rule(rule_id, run_id, article_id, group, items, draft: SigmaDraft, sigma: s
         warnings=lint_kql(converted.kql, sigma_yaml=sigma),
         source_sigma_hash=sigma_hash,
     )
+
+
+def rule_level(parsed_rule) -> str | None:
     level = getattr(parsed_rule.level, "name", None)
+    return level.lower() if level else None
+
+
+def _rule(rule_id, run_id, article_id, group, items, draft: SigmaDraft, sigma: str, parsed_rule) -> DetectionRule:
+    sigma_hash = sigma_digest(sigma)
+    query = converted_query(parsed_rule, sigma, sigma_hash)
     return DetectionRule(
         id=rule_id,
         run_id=run_id,
@@ -165,7 +174,7 @@ def _rule(rule_id, run_id, article_id, group, items, draft: SigmaDraft, sigma: s
         group_key=group,
         observable_ids=[item.id for item in items],
         title=parsed_rule.title or draft.title,
-        level=level.lower() if level else None,
+        level=rule_level(parsed_rule),
         sigma_yaml=sigma,
         sigma_hash=sigma_hash,
         rationale=draft.rationale,
