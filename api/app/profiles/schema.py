@@ -17,9 +17,11 @@ KNOWN_TAGS: dict[str, tuple[Any, str]] = {
         "Operating system the observable applies to.",
     ),
     "telemetry_category": (
-        str,
-        "Sigma logsource category whose telemetry records this behaviour: process_creation, registry_set, "
-        "registry_add, registry_event, file_event, network_connection, dns_query or image_load. Prefer "
+        Literal[
+            "process_creation", "registry_set", "registry_add", "registry_event", "file_event",
+            "network_connection", "dns_query", "image_load", "other",
+        ],
+        "Sigma logsource category whose telemetry records this behaviour, or 'other' if none fits. Prefer "
         "process_creation (schtasks.exe, sc.exe) or registry_set (TaskCache, Services keys) for scheduled tasks "
         "and services, because those convert to Defender XDR queries.",
     ),
@@ -100,6 +102,17 @@ def extraction_schema(definition: ProfileDefinition) -> type[BaseModel]:
 
 def _camel(name: str) -> str:
     return "".join(part.capitalize() for part in name.split("_"))
+
+
+class SigmaDraft(BaseModel):
+    """Structured output of the rule-generation stage (one rule per telemetry group)."""
+
+    title: str = Field(description="Short rule title naming the behaviour detected.")
+    sigma_yaml: str = Field(
+        description="One complete Sigma rule in YAML: title, description, logsource, detection, falsepositives, level. "
+        "Omit id, date, author, status and references; they are added automatically."
+    )
+    rationale: str = Field(description="One or two sentences: which observables the rule covers and why it is specific.")
 
 
 class RelevanceVerdict(BaseModel):

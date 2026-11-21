@@ -64,7 +64,8 @@ def test_text_extraction_is_linear_on_huge_flat_pages():
 
     text = html_to_text(html)
 
-    assert time.monotonic() - started < 5
+    # Linear takes ~4 s on a dev laptop; the old quadratic version took minutes. Loose bound avoids load flakes.
+    assert time.monotonic() - started < 20
     assert text.count("x") == 100_000 and "y" not in text
 
 

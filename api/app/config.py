@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     extraction_model: str = "claude-opus-5-5"
     extraction_effort: Literal["low", "medium", "high"] = "medium"
     rules_model: str = "claude-opus-5-5"
+    rules_effort: Literal["low", "medium", "high"] = "medium"
+    max_rule_groups_per_run: int = 6  # bounds Opus calls per article
 
     worker_poll_seconds: float = 2
     # A running run with no progress for this long is failed so it can be re-queued (must exceed one LLM call: timeout x (retries + 1)).

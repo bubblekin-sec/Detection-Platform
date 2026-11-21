@@ -75,6 +75,29 @@ export interface Observable {
   tags: Record<string, string>
 }
 
+export interface RuleQuery {
+  id: number
+  target: string
+  origin: 'converted' | 'llm' | 'human_edit'
+  query_text: string | null
+  status: 'ok' | 'failed'
+  error: string | null
+  warnings: string[]
+  stale: boolean
+}
+
+export interface DetectionRule {
+  id: string
+  title: string
+  level: string | null
+  status: 'pending_review' | 'approved' | 'rejected'
+  group: { platform: string; telemetry_category: string }
+  observable_ids: number[]
+  sigma_yaml: string
+  rationale: string | null
+  queries: RuleQuery[]
+}
+
 export interface PipelineRun {
   id: number
   article_id: number
@@ -87,6 +110,7 @@ export interface PipelineRun {
   finished_at: string | null
   stages: StageResult[]
   observables: Observable[]
+  rules: DetectionRule[]
 }
 
 /** The API returns every 4xx as {"detail": {"errors": ["field: message" | "message"]}}. */

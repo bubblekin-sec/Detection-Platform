@@ -11,7 +11,7 @@ from app.llm.factory import LLMNotConfigured, build_llm_client
 from app.main import create_app
 from app.models import Article, PipelineRun, Profile, ProfileVersion, Source
 from app.pipeline.run import claim_next_run, process_next_run
-from app.profiles.schema import RelevanceVerdict
+from app.profiles.schema import RelevanceVerdict, SigmaDraft
 from app.profiles.seed import seed_profiles
 from tests.fakes import ScriptedLLM
 
@@ -63,6 +63,22 @@ def no_observables() -> dict:
     return {field: [] for field in FIELDS}
 
 
+VALID_RULE = SigmaDraft(
+    title="Scheduled task to public folder",
+    sigma_yaml=(
+        "title: Scheduled task to public folder\n"
+        "logsource:\n  category: process_creation\n  product: windows\n"
+        "detection:\n  sel:\n    CommandLine|contains: 'schtasks /create'\n  condition: sel\n"
+        "level: high\n"
+    ),
+    rationale="Covers the observed task creation.",
+)
+
+
+def stage(body: dict, name: str) -> dict:
+    return next(item for item in body["stages"] if item["stage"] == name)
+
+
 def verdict(score: int) -> RelevanceVerdict:
     return RelevanceVerdict(score=score, rationale="Concrete scheduled task persistence.", signals=["schtasks /create"])
 
@@ -110,7 +126,7 @@ def test_relevant_article_passes_relevance(api, article, factory):
 
     body = api.get(f"/api/runs/{run['id']}").json()
     assert body["status"] == "succeeded"
-    assert [stage["stage"] for stage in body["stages"]] == ["junk_filter", "relevance", "extraction"]
+    assert [item["stage"] for item in body["stages"]] == ["junk_filter", "relevance", "extraction", "rule_generation"]
     relevance = body["stages"][1]
     assert relevance["status"] == "passed"
     assert relevance["output"] == {
@@ -401,6 +417,7 @@ def passing_run(api, article, factory, extraction) -> dict:
     llm = ScriptedLLM()
     llm.queue(RelevanceVerdict, verdict(8))
     llm.queue(EXTRACTION, extraction)
+    llm.default(SigmaDraft, VALID_RULE)
     process_next_run(factory, llm, Settings(_env_file=None))
     return {"run": api.get(f"/api/runs/{run['id']}").json(), "llm": llm}
 
@@ -409,8 +426,8 @@ def test_extraction_stores_observables_with_tags_and_verified_evidence(api, arti
     result = passing_run(api, article, factory, LANTERN_EXTRACTION)
     body, llm = result["run"], result["llm"]
 
-    assert (body["status"], body["current_step"]) == ("succeeded", "extraction")
-    extraction = body["stages"][-1]
+    assert (body["status"], body["current_step"]) == ("succeeded", "rule_generation")
+    extraction = stage(body, "extraction")
     assert extraction["stage"] == "extraction"
     assert extraction["output"]["total"] == 2 and extraction["output"]["unverified"] == 1
     assert extraction["output"]["counts"]["scheduled_tasks"] == 1
@@ -432,7 +449,7 @@ def test_an_article_with_nothing_to_extract_still_succeeds(api, article, factory
 
     assert body["status"] == "succeeded"
     assert body["observables"] == []
-    assert body["stages"][-1]["output"]["total"] == 0
+    assert stage(body, "extraction")["output"]["total"] == 0
 
 
 def test_filtered_articles_are_never_sent_to_extraction(api, article, factory):

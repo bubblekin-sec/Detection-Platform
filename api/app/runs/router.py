@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.db import get_session
-from app.models import Article, PipelineRun, ProfileVersion
+from app.models import Article, DetectionRule, PipelineRun, ProfileVersion
 from app.pipeline.run import queue_run
 from app.profiles.seed import latest_version
 
@@ -45,6 +45,42 @@ class ObservableOut(BaseModel):
     tags: dict[str, Any]
 
 
+class QueryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    target: str
+    origin: str
+    query_text: str | None
+    status: str
+    error: str | None
+    warnings: list[str]
+    stale: bool = False
+
+
+class RuleOut(BaseModel):
+    id: str
+    title: str
+    level: str | None
+    status: str
+    group: dict[str, Any]
+    observable_ids: list[int]
+    sigma_yaml: str
+    rationale: str | None
+    queries: list[QueryOut]
+
+
+def rule_out(rule: DetectionRule) -> RuleOut:
+    return RuleOut(
+        id=rule.id, title=rule.title, level=rule.level, status=rule.status, group=rule.group_key,
+        observable_ids=rule.observable_ids, sigma_yaml=rule.sigma_yaml, rationale=rule.rationale,
+        queries=[
+            QueryOut.model_validate(query).model_copy(update={"stale": query.source_sigma_hash != rule.sigma_hash})
+            for query in rule.queries
+        ],
+    )
+
+
 class ProfileRef(BaseModel):
     slug: str
     version: int
@@ -62,6 +98,7 @@ class RunOut(BaseModel):
     finished_at: datetime | None
     stages: list[StageOut]
     observables: list[ObservableOut]
+    rules: list[RuleOut]
 
 
 def _out(run: PipelineRun) -> RunOut:
@@ -77,6 +114,7 @@ def _out(run: PipelineRun) -> RunOut:
         finished_at=run.finished_at,
         stages=[StageOut.model_validate(stage) for stage in run.stages],
         observables=[ObservableOut.model_validate(item) for item in run.observables],
+        rules=[rule_out(rule) for rule in run.rules],
     )
 
 
@@ -84,7 +122,9 @@ def _load(session: Session, run_id: int) -> PipelineRun | None:
     return session.scalars(
         select(PipelineRun)
         .where(PipelineRun.id == run_id)
-        .options(selectinload(PipelineRun.stages), selectinload(PipelineRun.observables), joinedload(PipelineRun.profile_version).joinedload(ProfileVersion.profile))
+        .options(selectinload(PipelineRun.stages), selectinload(PipelineRun.observables),
+            selectinload(PipelineRun.rules).selectinload(DetectionRule.queries),
+            joinedload(PipelineRun.profile_version).joinedload(ProfileVersion.profile))
         .execution_options(populate_existing=True)
     ).first()
 
@@ -116,7 +156,9 @@ def list_article_runs(article_id: int, session: SessionDep) -> list[RunOut]:
     runs = session.scalars(
         select(PipelineRun)
         .where(PipelineRun.article_id == article_id)
-        .options(selectinload(PipelineRun.stages), selectinload(PipelineRun.observables), joinedload(PipelineRun.profile_version).joinedload(ProfileVersion.profile))
+        .options(selectinload(PipelineRun.stages), selectinload(PipelineRun.observables),
+            selectinload(PipelineRun.rules).selectinload(DetectionRule.queries),
+            joinedload(PipelineRun.profile_version).joinedload(ProfileVersion.profile))
         .order_by(PipelineRun.id.desc())
         .limit(20)
     ).all()

@@ -9,6 +9,7 @@ import {
   type PipelineRun,
   type StageResult,
 } from './api'
+import { RuleCard } from './RuleCard'
 
 const ACTIVE = new Set(['queued', 'running'])
 
@@ -121,8 +122,76 @@ export function RunPanel({ articleId, pollMs = 2000 }: { articleId: number; poll
           </p>
         </div>
       )}
+      {run && <Rules run={run} />}
       {run && <Observables run={run} />}
     </section>
+  )
+}
+
+function Rules({ run }: { run: PipelineRun }) {
+  const stage = run.stages.find((candidate) => candidate.stage === 'rule_generation')
+  if (!stage) return null
+  const note = stage.output.note as string | undefined
+  return (
+    <div className="rules">
+      <h3>Rules ({run.rules.length})</h3>
+      {note && <p className="muted">{note}</p>}
+      {run.rules.map((rule) => (
+        <RuleCard key={rule.id} rule={rule} />
+      ))}
+      <GroupProblems output={stage.output} />
+    </div>
+  )
+}
+
+interface GroupOutcome {
+  platform: string
+  telemetry_category: string
+  observables: number
+  outcome: 'created' | 'invalid' | 'llm_error' | 'error' | 'not_attempted'
+  error?: string
+  errors?: string[]
+}
+
+const OUTCOME_LABELS: Record<string, string> = {
+  invalid: 'Sigma still invalid after a repair attempt',
+  llm_error: 'Model call failed',
+  error: 'Internal error',
+  not_attempted: 'Not attempted',
+}
+
+/** Groups that produced no rule, and groups skipped by the per-run cap: never hidden from the reviewer. */
+function GroupProblems({ output }: { output: Record<string, unknown> }) {
+  const groups = ((output.groups as GroupOutcome[] | undefined) ?? []).filter((group) => group.outcome !== 'created')
+  const skipped = (output.skipped_groups as number | undefined) ?? 0
+  if (groups.length === 0 && skipped === 0) return null
+  return (
+    <div className="group-problems" role="note" aria-label="Groups without a rule">
+      <h4>Groups without a rule</h4>
+      <ul>
+        {groups.map((group, index) => (
+          <li key={index}>
+            <strong>
+              {group.platform} · {group.telemetry_category}
+            </strong>{' '}
+            ({group.observables} observable{group.observables === 1 ? '' : 's'}): {OUTCOME_LABELS[group.outcome] ?? group.outcome}
+            {group.error && <> — {group.error}</>}
+            {group.errors && group.errors.length > 0 && (
+              <ul className="rule-warnings">
+                {group.errors.map((error, errorIndex) => (
+                  <li key={errorIndex}>{error}</li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+        {skipped > 0 && (
+          <li>
+            {skipped} more group{skipped === 1 ? '' : 's'} skipped by the per-run limit (MAX_RULE_GROUPS_PER_RUN).
+          </li>
+        )}
+      </ul>
+    </div>
   )
 }
 

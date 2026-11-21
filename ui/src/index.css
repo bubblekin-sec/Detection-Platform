@@ -327,6 +327,101 @@ h2 {
   margin: 4px 0 0;
 }
 
+.rules {
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+  padding-top: 4px;
+}
+
+.rules h3 {
+  font-size: 1rem;
+  margin: 12px 0 8px;
+}
+
+.rule-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--bg);
+}
+
+.rule-header h4 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.rule-card h5 {
+  margin: 12px 0 4px;
+  font-size: 0.85rem;
+}
+
+.code-block {
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.rule-status {
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--tag-seed-bg);
+  color: var(--tag-seed-text);
+}
+
+.rule-status-approved {
+  background: var(--tag-user-bg);
+  color: var(--tag-user-text);
+}
+
+.rule-status-rejected {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.code-figure {
+  margin: 0;
+}
+
+.code-figure figcaption {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 12px 0 4px;
+}
+
+.group-problems {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.88rem;
+}
+
+.group-problems h4 {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+}
+
+.group-problems > ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.rule-warnings {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--danger);
+  font-size: 0.82rem;
+}
+
 .observable-tag {
   background: var(--tag-seed-bg);
   color: var(--tag-seed-text);

@@ -16,12 +16,19 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
 from app.llm.client import LLMClient, LLMError
-from app.models import ACTIVE_RUN_CONSTRAINT, Article, Observable, PipelineRun, ProfileVersion, Source, StageResult
+from app.models import (
+    ACTIVE_RUN_CONSTRAINT, Article, DetectionRule, Observable, PipelineRun, ProfileVersion, Source, StageResult,
+)
 from app.pipeline.junk import junk_reason
+from app.pipeline.rule_generation import generate_rules
 from app.profiles.compile import compile_extraction, compile_relevance, render_article, unescape_markup
 from app.profiles.schema import ProfileDefinition, RelevanceVerdict, extraction_schema
 
 log = logging.getLogger(__name__)
+
+
+class RunAbandoned(Exception):
+    """The run is no longer `running` (failed as stalled by another worker), so this worker must stop writing."""
 ACTIVE_STATUSES = ("queued", "running")
 Clock = Callable[[], datetime]
 
@@ -99,6 +106,8 @@ def process_next_run(
         return None
     try:
         _execute(session_factory, llm, settings, run_id, clock)
+    except RunAbandoned as abandoned:  # another worker closed this run (stalled); nothing more to record
+        log.warning("%s", abandoned)
     except Exception as error:  # never leave a run stuck in "running" because of a bug
         log.exception("Run %s crashed", run_id)
         _finish(session_factory, run_id, "failed", None, clock(), error=f"Internal error ({type(error).__name__}).")
@@ -114,7 +123,7 @@ def _execute(session_factory: sessionmaker[Session], llm: LLMClient, settings: S
         article = session.get(Article, run.article_id)
         source = session.get(Source, article.source_id)
         definition = ProfileDefinition.model_validate(run.profile_version.definition)
-        title, url, text = article.title, article.url, article.content_text
+        title, url, text, article_id = article.title, article.url, article.content_text, article.id
         source_name, source_config = source.name, dict(source.config or {})
 
     # Stage 1: deterministic junk filter (source settings may have changed since the article was fetched).
@@ -205,8 +214,40 @@ def _execute(session_factory: sessionmaker[Session], llm: LLMClient, settings: S
         ),
         observables=observables,
     )
-    # Rule generation (increment 6) continues from here.
-    _finish(session_factory, run_id, "succeeded", "extraction", clock())
+
+    # Stage 4: rule generation from verified observables only.
+    _set_step(session_factory, run_id, "rule_generation")
+    started = clock()
+    if not any(item.evidence_verified for item in observables):
+        _record(session_factory, run_id, StageResult(
+            stage="rule_generation", status="passed", output={"note": "No verified observables to build rules from."},
+            started_at=started, finished_at=clock(),
+        ))
+        _finish(session_factory, run_id, "succeeded", "rule_generation", clock())
+        return
+    generated = generate_rules(
+        llm, settings, definition, run_id=run_id, article_id=article_id, title=title, url=url,
+        observables=observables, today=started.date(),
+        on_progress=lambda: _set_step(session_factory, run_id, "rule_generation"),  # heartbeat per model call
+    )
+    created = len(generated.rules)
+    _record(
+        session_factory,
+        run_id,
+        StageResult(
+            stage="rule_generation", status="passed" if created else "failed",
+            output={"groups": generated.groups, "rules": created, "skipped_groups": generated.skipped_groups},
+            compiled_prompt=generated.system_prompt, model=settings.rules_model,
+            input_tokens=generated.usage.input_tokens, output_tokens=generated.usage.output_tokens,
+            cache_read_tokens=generated.usage.cache_read_tokens, started_at=started, finished_at=clock(),
+        ),
+        rules=generated.rules,
+    )
+    if created:
+        _finish(session_factory, run_id, "succeeded", "rule_generation", clock())
+    else:
+        reason = generated.first_error or f"No valid rule could be generated ({len(generated.groups)} group(s) tried)."
+        _finish(session_factory, run_id, "failed", "rule_generation", clock(), error=reason)
 
 
 def collect_observables(extraction: BaseModel, definition: ProfileDefinition, article_text: str) -> list[Observable]:
@@ -243,14 +284,25 @@ def _normalize(text: str) -> str:
 
 
 def _record(
-    session_factory: sessionmaker[Session], run_id: int, stage: StageResult, *, observables: list[Observable] | None = None
+    session_factory: sessionmaker[Session],
+    run_id: int,
+    stage: StageResult,
+    *,
+    observables: list[Observable] | None = None,
+    rules: list[DetectionRule] | None = None,
 ) -> None:
+    """Store a stage result and its outputs in one transaction, only while this worker still owns the run."""
     with session_factory() as session:
+        status = session.scalar(select(PipelineRun.status).where(PipelineRun.id == run_id).with_for_update())
+        if status != "running":  # e.g. failed as stalled by another worker: don't add results to a closed run
+            session.rollback()
+            raise RunAbandoned(f"Run {run_id} is {status}; results discarded.")
         stage.run_id = run_id
         session.add(stage)
         for observable in observables or []:
             observable.run_id = run_id
             session.add(observable)
+        session.add_all(rules or [])
         session.execute(update(PipelineRun).where(PipelineRun.id == run_id).values(heartbeat_at=stage.finished_at))
         session.commit()
 
@@ -270,5 +322,8 @@ def _finish(
     if step is not None:
         values["current_step"] = step
     with session_factory() as session:
-        session.execute(update(PipelineRun).where(PipelineRun.id == run_id).values(**values))
+        # Only a running run can finish; a run already closed (stalled, interrupted) keeps its outcome.
+        session.execute(
+            update(PipelineRun).where(PipelineRun.id == run_id, PipelineRun.status == "running").values(**values)
+        )
         session.commit()

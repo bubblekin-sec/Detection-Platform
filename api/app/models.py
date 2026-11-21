@@ -117,6 +117,8 @@ class PipelineRun(Base):
     profile_version: Mapped[ProfileVersion] = relationship()
     stages: Mapped[list["StageResult"]] = relationship(order_by="StageResult.id", cascade="all, delete-orphan")
     observables: Mapped[list["Observable"]] = relationship(order_by="Observable.id", cascade="all, delete-orphan")
+    # Rules are records that outlive their run: no delete cascade from runs.
+    rules: Mapped[list["DetectionRule"]] = relationship(order_by="DetectionRule.position")
 
 
 class StageResult(Base):
@@ -149,3 +151,49 @@ class Observable(Base):
     # False when the quote could not be found in the article: shown as a warning, excluded from rule generation.
     evidence_verified: Mapped[bool] = mapped_column()
     tags: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+
+
+RULE_STATUSES = ("pending_review", "approved", "rejected")
+
+
+class DetectionRule(Base):
+    """A Sigma rule of record. Its id is the Sigma `id`, stable across edits and exports."""
+
+    __tablename__ = "detection_rules"
+    __table_args__ = (CheckConstraint(f"status IN {RULE_STATUSES}", name="ck_detection_rules_status"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)  # UUID text, also the Sigma id
+    run_id: Mapped[int] = mapped_column(ForeignKey("pipeline_runs.id"), index=True)  # no cascade: rules are records
+    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)  # order within the run (largest group first)
+    group_key: Mapped[dict[str, Any]] = mapped_column(JSONType)  # {"platform": ..., "telemetry_category": ...}
+    observable_ids: Mapped[list[int]] = mapped_column(JSONType, default=list)
+    title: Mapped[str] = mapped_column(Text)
+    level: Mapped[str | None] = mapped_column(String(20))
+    sigma_yaml: Mapped[str] = mapped_column(Text)
+    sigma_hash: Mapped[str] = mapped_column(String(64))
+    rationale: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="pending_review", index=True)
+    reviewer_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    queries: Mapped[list["RuleQuery"]] = relationship(order_by="RuleQuery.id", cascade="all, delete-orphan")
+
+
+class RuleQuery(Base):
+    """A query artifact for one SIEM target. New targets or strategies add rows, not columns."""
+
+    __tablename__ = "rule_queries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_id: Mapped[str] = mapped_column(ForeignKey("detection_rules.id", ondelete="CASCADE"), index=True)
+    target: Mapped[str] = mapped_column(String(50))  # defender_xdr; later sentinel, splunk
+    origin: Mapped[str] = mapped_column(String(20))  # converted | llm | human_edit
+    query_text: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20))  # ok | failed
+    error: Mapped[str | None] = mapped_column(Text)
+    warnings: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    source_sigma_hash: Mapped[str] = mapped_column(String(64))  # stale when it differs from the rule's sigma_hash
+    llm_model: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

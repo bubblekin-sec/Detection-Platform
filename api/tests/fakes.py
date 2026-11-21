@@ -39,7 +39,12 @@ class ScriptedLLM:
 
     def __init__(self) -> None:
         self.queued: dict[str, list] = {}
+        self.defaults: dict[str, object] = {}
         self.calls: list[dict] = []
+
+    def default(self, schema: type | str, output) -> None:
+        """Output returned whenever nothing is queued for this schema."""
+        self.defaults[schema if isinstance(schema, str) else schema.__name__] = output
 
     def queue(self, schema: type | str, *outputs) -> None:
         name = schema if isinstance(schema, str) else schema.__name__
@@ -52,6 +57,8 @@ class ScriptedLLM:
             {"model": model, "system": system, "user": user, "schema": schema.__name__, "effort": effort, "fallbacks": fallbacks}
         )
         pending = self.queued.get(schema.__name__) or []
+        if not pending and schema.__name__ in self.defaults:
+            pending = [self.defaults[schema.__name__]]
         if not pending:
             raise AssertionError(f"ScriptedLLM has no queued output for {schema.__name__}")
         output = pending.pop(0)

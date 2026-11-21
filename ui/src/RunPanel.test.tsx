@@ -18,6 +18,7 @@ const base: PipelineRun = {
   finished_at: null,
   stages: [],
   observables: [],
+  rules: [],
 }
 
 function relevance(score: number, status: 'passed' | 'filtered') {
@@ -145,6 +146,36 @@ describe('RunPanel', () => {
     render(<RunPanel articleId={10} pollMs={5} />)
 
     expect(await screen.findByText(/No observables were extracted/)).toBeInTheDocument()
+  })
+
+  it('shows groups that produced no rule and groups skipped by the cap', async () => {
+    const ruleStage = {
+      ...extractionStage,
+      stage: 'rule_generation',
+      status: 'failed' as const,
+      output: {
+        rules: 0,
+        skipped_groups: 2,
+        groups: [
+          { platform: 'windows', telemetry_category: 'registry_set', observables: 1, outcome: 'invalid', errors: ["Detection 'x' not defined in detections"] },
+          { platform: 'windows', telemetry_category: 'file_event', observables: 3, outcome: 'llm_error', error: 'Rate limited by the Anthropic API (429) after retries.' },
+        ],
+      },
+    }
+    fakeApi({
+      'GET /api/articles/10/runs': () => ({
+        status: 200,
+        body: [{ ...base, status: 'failed', current_step: 'rule_generation', error: 'No valid rule', stages: [relevance(8, 'passed'), extractionStage, ruleStage] }],
+      }),
+    })
+
+    render(<RunPanel articleId={10} pollMs={5} />)
+
+    const problems = await screen.findByRole('note', { name: 'Groups without a rule' })
+    expect(problems).toHaveTextContent('Sigma still invalid after a repair attempt')
+    expect(problems).toHaveTextContent("Detection 'x' not defined in detections")
+    expect(problems).toHaveTextContent('Model call failed — Rate limited')
+    expect(problems).toHaveTextContent('2 more groups skipped by the per-run limit')
   })
 
   it('stops polling once the run finishes', async () => {

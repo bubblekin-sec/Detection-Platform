@@ -1,6 +1,27 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: increments 1 to 5 done. Increment 6 (rule generation) is next.
+Status: increments 1 to 6 done. Increment 6b (LLM-written KQL fallback) and 7 (review screen) are next.
+
+**6 notes (rule generation).**
+- **Grouping:** verified observables only, grouped by `(platform, telemetry_category)` (not `logsource_hint`, which is free text and would fragment groups). Largest groups go first, capped by `MAX_RULE_GROUPS_PER_RUN` (default 6) to bound Opus calls per article.
+- **Generation and validation:**
+  - Per group, `claude-opus-5-5` (effort medium, refusal fallbacks) writes one Sigma rule from the observables and their quotes, not the whole article. The prompt carries the increment 1 guidance: no trailing backslashes, and tasks and services as process_creation or registry_set.
+  - The draft is validated by `app/detection/sigma.py`. An invalid draft gets one repair attempt with the validator's errors.
+  - The platform sets `id` (UUID, also the rule's primary key), `status: experimental`, `references` (article URL) and `date`. The model never does.
+- **Per-group outcomes** (`created`, `invalid` with errors, `llm_error`) are stored in the stage output. One failed group never loses the others. A run fails only if every group fails.
+- **Query artifacts:** each rule gets a `rule_queries` row (target `defender_xdr`, origin `converted`) holding the KQL or the conversion error, plus lint warnings:
+  - A literal `*` in `endswith`/`startswith`/`has`/`==`/`=~`.
+  - A registry `TargetObject` whose value name may need `RegistryValueName`.
+  - `source_sigma_hash` marks an artifact stale when the Sigma is later edited.
+- **Deviation from the data model above:** observable links are an `observable_ids` JSON list on the rule, not a join table. That's simpler, and enough until rules can be built from several runs.
+- **Hardening from review:**
+  - **The platform's metadata can't be bypassed.** `finalize_sigma` loads drafts with pySigma's own loader (which rejects duplicate keys) and tolerates empty extra documents. Anything that isn't exactly one mapping goes back to the model for repair. A rule is accepted only if its Sigma `id` equals the platform's id.
+  - **Heartbeat per model call** during rule generation. Stage writes and `_finish` only apply while the run is still `running`, so a run another worker failed as stalled can't be revived and can't gain rules.
+  - **Groups are isolated.** An unexpected error in one group is recorded as `error`, and the other groups' rules are kept. A non-refusal model error (auth, model not found, rate limit, connection) stops the remaining groups (`not_attempted`) and becomes the run error. Each group records the served model and `fallback_from`.
+  - **`telemetry_category` is a fixed list** (plus `other`), so free-text variants can't fragment groups. `other` and `unknown` observables are not sent for rules.
+  - **Lint** also covers `_cs`, negated, `has*` and list (`in~ (...)`) operators. The registry value-name warning only fires when a `TargetObject` value ends in a name, not a backslash.
+  - **Rules are records:** runs no longer cascade-delete them. A `position` column keeps them in largest-group-first order.
+  - **UI:** groups with no rule (invalid, model error, not attempted) and groups skipped by the cap are listed with their reasons. Code blocks are labelled figures.
 
 **5 notes (extraction).**
 - **The output schema is generated from the profile** (`extraction_schema`): one list per `extract_fields` entry. Each item has `value`, `evidence` and one typed field per tag; `platform` is an enum, and `telemetry_category` carries the increment 1 guidance on which Sigma categories convert. A new team profile gets its own schema with no code change.
@@ -25,7 +46,7 @@ Status: increments 1 to 5 done. Increment 6 (rule generation) is next.
   - The worker claims runs with `FOR UPDATE SKIP LOCKED` and commits the claim before calling the model, so no transaction is open during LLM calls.
   - A crash marks the run failed instead of leaving it stuck. So do Ctrl+C and SIGTERM, which are recorded as "Interrupted" before the worker exits. Re-queueing an article with an active run returns that run.
   - A partial unique index allows only one queued or running run per article and profile version, so concurrent requests cannot queue duplicates.
-  - Each stage updates `heartbeat_at`. Before claiming, workers fail any `running` run with no progress for `RUN_STALE_AFTER_SECONDS` (default 900), so a killed worker never blocks an article.
+  - Each stage updates `heartbeat_at`. Before claiming, workers fail any `running` run with no progress for `RUN_STALE_AFTER_SECONDS` (default 1800, above one LLM call's worst case), so a killed worker never blocks an article.
   - `queue-runs` re-queues articles whose runs all failed.
 - **LLM client:**
   - Uses `messages.create` with an `output_config.format` JSON schema, not `messages.parse`. `parse` validates JSON before `stop_reason` can be checked, so a refusal or a truncated response would surface as a pydantic error.
