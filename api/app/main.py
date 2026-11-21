@@ -1,9 +1,14 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config import Settings
+from app.db import make_engine, make_session_factory
 from app.detection.router import router as detection_router
+from app.sources.router import router as sources_router
 
 
 async def request_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
@@ -12,9 +17,18 @@ async def request_validation_error(_: Request, exc: RequestValidationError) -> J
     return JSONResponse(status_code=422, content={"detail": {"errors": errors}})
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    yield
+    app.state.engine.dispose()
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title=settings.app_name)
+    app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    # Creating the engine does not connect; the first request that needs the database does.
+    app.state.engine = make_engine(settings)
+    app.state.session_factory = make_session_factory(app.state.engine)
     app.add_exception_handler(RequestValidationError, request_validation_error)
 
     @app.get("/api/health")
@@ -22,6 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(detection_router)
+    app.include_router(sources_router)
     return app
 
 

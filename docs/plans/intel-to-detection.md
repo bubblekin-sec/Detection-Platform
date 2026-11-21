@@ -1,6 +1,15 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: increment 1 done. Increment 2a is next. Paths below are proposed until an increment lands.
+Status: increments 1 and 2a done. Increment 2b (UI scaffold) is next.
+
+**2a notes.**
+- Huntable `sources.yaml` is pinned at `904a6c4`: 38 sources, 28 seeded active (upstream active and has an RSS feed). The rest start inactive, with `config.upstream_active` recording the upstream flag.
+- Seeding only inserts missing slugs and never updates a row, so upstream changes reach existing installs only through a deliberate migration or by editing them.
+- `POST /api/sources` creates RSS sources and returns 409 when the name's slug is already taken. Editing a source (PATCH) is not built yet.
+- **Portability:**
+  - `DATABASE_URL` is the only DB setting. On Azure it comes from a Container Apps secret reference, with `sslmode=require` for Azure Database for PostgreSQL; Entra token auth comes later.
+  - Run `alembic upgrade head` and `python -m app.cli seed-sources` as a Container Apps job using the same image, not at API startup.
+  - The image has been checked running both commands against the compose database. Paths below are proposed until an increment lands.
 
 Reference design: [Huntable-CTI-Studio](https://github.com/dfirtnt/Huntable-CTI-Studio) (MIT). We reuse its pipeline design and seed source list, not its stack.
 
@@ -148,7 +157,7 @@ Filter documents are applied to the rule they reference. Backend-unsupported fea
 - **pySigma XDR coverage.** Increment 1 measures it. The conversion code is isolated in `detection/kql.py`.
 - **pySigma is LGPL-2.1.** Enterprise legal should confirm. Only `detection/{sigma,kql}.py` import it.
 - **Prompt injection from article text.** LLM output is constrained by a pydantic schema and Sigma validation, and nothing it produces is executed.
-- **SSRF from user-added sources.** The MVP allows only http/https. Egress policy is an enterprise input.
+- **SSRF from user-added sources.** `POST /api/sources` allows only http/https, but it still accepts `http://localhost/` and `http://169.254.169.254/`. Before increment 3 fetches any user-supplied URL, the fetcher must resolve the host and refuse loopback, private, link-local and metadata addresses. It must re-check after every redirect and cap response size. Egress policy is an enterprise input.
 - **LLM cost.** Relevance gates extraction, token usage is stored per stage, and there is no automatic schedule in the MVP.
 - **Stale `running` runs after a crash.** Re-running creates a new run. Reclaiming stale runs is deferred.
 - **Duplicate rules on re-run.** Accepted until increment 10.

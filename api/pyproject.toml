@@ -4,10 +4,14 @@ version = "0.1.0"
 description = "Detection Platform API: threat intel to detection pipeline"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.20.1",
     "fastapi>=0.165.0",
+    "psycopg[binary]>=3.3.9",
     "pydantic-settings>=2.16.3",
     "pysigma>=1.5,<2",
     "pysigma-backend-kusto>=1.0.1,<2",
+    "pyyaml>=6.0.4",
+    "sqlalchemy>=2.1.9",
     "uvicorn[standard]>=0.54.0",
 ]
 

@@ -1,0 +1,33 @@
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import JSON, CheckConstraint, DateTime, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+
+SOURCE_SLUG_CONSTRAINT = "uq_sources_slug"
+
+
+class Source(Base):
+    __tablename__ = "sources"
+    __table_args__ = (
+        CheckConstraint("origin IN ('huntable_seed', 'user')", name="ck_sources_origin"),
+        UniqueConstraint("slug", name=SOURCE_SLUG_CONSTRAINT),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    slug: Mapped[str] = mapped_column(String(100))
+    name: Mapped[str] = mapped_column(String(200))
+    url: Mapped[str] = mapped_column(String(2048))
+    rss_url: Mapped[str | None] = mapped_column(String(2048))
+    active: Mapped[bool] = mapped_column(default=True)
+    check_frequency_seconds: Mapped[int] = mapped_column(Integer, default=3600)
+    description: Mapped[str | None] = mapped_column(Text)
+    # Fetch/scrape settings kept verbatim (Huntable's allow, robots, extract, discovery, ...) for later increments.
+    config: Mapped[dict[str, Any]] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), default=dict)
+    origin: Mapped[str] = mapped_column(String(20))  # "huntable_seed" | "user"
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

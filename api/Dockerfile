@@ -8,6 +8,8 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=/opt/venv PAT
 COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --locked --no-dev
 
+COPY alembic.ini ./
+COPY migrations ./migrations
 COPY app ./app
 
 RUN useradd --uid 10001 --no-create-home appuser

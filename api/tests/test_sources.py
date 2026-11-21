@@ -1,0 +1,159 @@
+import pytest
+from sqlalchemy import func, select
+
+from app.models import Source
+from app.sources.seed import seed_sources
+
+HUNTABLE_SOURCE_COUNT = 38
+HUNTABLE_ACTIVE_RSS_COUNT = 28
+
+
+def count_sources(session) -> int:
+    return session.scalar(select(func.count()).select_from(Source))
+
+
+def by_slug(session, slug: str) -> Source:
+    return session.scalars(select(Source).where(Source.slug == slug)).one()
+
+
+def test_seeding_twice_adds_each_source_once(db_session):
+    first = seed_sources(db_session)
+    second = seed_sources(db_session)
+
+    assert first == {"added": HUNTABLE_SOURCE_COUNT, "existing": 0, "skipped_user_owned": []}
+    assert second == {"added": 0, "existing": HUNTABLE_SOURCE_COUNT, "skipped_user_owned": []}
+    assert count_sources(db_session) == HUNTABLE_SOURCE_COUNT
+
+
+def test_only_upstream_active_rss_sources_start_active(db_session):
+    seed_sources(db_session)
+
+    assert by_slug(db_session, "cisco_talos").active is True
+    assert by_slug(db_session, "splunk_security_blog").active is False  # scrape-only
+    assert by_slug(db_session, "vmray_blog").active is False  # disabled upstream
+    active = db_session.scalar(select(func.count()).select_from(Source).where(Source.active))
+    assert active == HUNTABLE_ACTIVE_RSS_COUNT
+
+
+def test_seed_preserves_scrape_config_and_origin(db_session):
+    seed_sources(db_session)
+
+    dfir = by_slug(db_session, "dfir_report")
+    assert dfir.origin == "huntable_seed"
+    assert dfir.config["archive_url_pattern"] == "https://thedfirreport.com/page/{page}/"
+    assert dfir.config["lookback_days"] == 180
+    assert dfir.config["upstream_active"] is True
+    assert "discovery" in by_slug(db_session, "ncsc_uk").config
+
+
+def test_reseeding_never_overwrites_an_edited_source(db_session):
+    seed_sources(db_session)
+    talos = by_slug(db_session, "cisco_talos")
+    talos.name = "Talos (renamed by me)"
+    talos.active = False
+    db_session.commit()
+
+    seed_sources(db_session)
+    db_session.expire_all()
+
+    talos = by_slug(db_session, "cisco_talos")
+    assert (talos.name, talos.active) == ("Talos (renamed by me)", False)
+
+
+def test_list_sources(db_client, db_session):
+    seed_sources(db_session)
+
+    response = db_client.get("/api/sources")
+
+    assert response.status_code == 200
+    sources = response.json()
+    assert len(sources) == HUNTABLE_SOURCE_COUNT
+    talos = next(source for source in sources if source["slug"] == "cisco_talos")
+    assert talos["rss_url"].startswith("https://")
+    assert talos["origin"] == "huntable_seed"
+
+
+def test_add_rss_source(db_client, db_session):
+    response = db_client.post(
+        "/api/sources",
+        json={"name": "Example Threat Blog", "url": "https://blog.example.com/", "rss_url": "https://blog.example.com/feed"},
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    assert created["slug"] == "example_threat_blog"
+    assert (created["origin"], created["active"]) == ("user", True)
+    assert seed_sources(db_session)["added"] == HUNTABLE_SOURCE_COUNT  # seed leaves user rows alone
+    listed = db_client.get("/api/sources").json()
+    assert any(source["slug"] == "example_threat_blog" for source in listed)
+
+
+def test_add_source_rejects_non_http_urls(db_client):
+    for bad in ["ftp://example.com/feed", "javascript:alert(1)", "file:///etc/passwd", "not a url"]:
+        response = db_client.post("/api/sources", json={"name": "Bad", "url": "https://ok.example.com", "rss_url": bad})
+
+        assert response.status_code == 422, bad
+        errors = response.json()["detail"]["errors"]
+        assert any(error.startswith("rss_url") for error in errors), errors
+
+
+def test_add_source_with_taken_name_conflicts(db_client, db_session):
+    seed_sources(db_session)
+
+    response = db_client.post(
+        "/api/sources", json={"name": "Cisco Talos", "url": "https://x.example.com", "rss_url": "https://x.example.com/rss"}
+    )
+
+    assert response.status_code == 409
+    assert "cisco_talos" in response.json()["detail"]["errors"][0]
+
+
+def test_seed_maps_frequency_and_missing_rss(db_session):
+    seed_sources(db_session)
+
+    assert by_slug(db_session, "cisco_talos").check_frequency_seconds == 1800
+    splunk = by_slug(db_session, "splunk_security_blog")
+    assert splunk.rss_url is None
+    assert splunk.config["upstream_active"] is True
+
+
+def test_seed_skips_and_reports_a_slug_a_user_already_owns(db_client, db_session):
+    db_client.post(
+        "/api/sources", json={"name": "Cisco Talos", "url": "https://mine.example.com", "rss_url": "https://mine.example.com/rss"}
+    )
+
+    result = seed_sources(db_session)
+
+    assert result["added"] == HUNTABLE_SOURCE_COUNT - 1
+    assert result["skipped_user_owned"] == ["cisco_talos"]
+    talos = by_slug(db_session, "cisco_talos")
+    assert (talos.origin, talos.url) == ("user", "https://mine.example.com/")
+
+
+def test_list_sources_is_ordered_by_name(db_client, db_session):
+    for name in ["Zeta Feed", "alpha feed", "Mid Feed"]:
+        db_client.post("/api/sources", json={"name": name, "url": "https://x.example.com", "rss_url": "https://x.example.com/rss"})
+
+    names = [source["name"] for source in db_client.get("/api/sources").json()]
+
+    assert names == list(db_session.scalars(select(Source.name).order_by(Source.name)))
+    assert names != ["Zeta Feed", "alpha feed", "Mid Feed"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "field"),
+    [
+        # Normalization percent-encodes '<' to '%3C', tripling the stored length past the column limit.
+        ({"rss_url": "https://a.example/" + "<" * 1000}, "rss_url"),
+        ({"name": "a\u0000b"}, "name"),
+        ({"description": "bad\u0000"}, "description"),
+    ],
+    ids=["url-grows-on-normalization", "nul-in-name", "nul-in-description"],
+)
+def test_add_source_rejects_values_postgres_cannot_store(db_client, payload, field):
+    body = {"name": "Fine", "url": "https://ok.example.com", "rss_url": "https://ok.example.com/rss"} | payload
+
+    response = db_client.post("/api/sources", json=body)
+
+    assert response.status_code == 422
+    assert any(error.startswith(field) for error in response.json()["detail"]["errors"])
