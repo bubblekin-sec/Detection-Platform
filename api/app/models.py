@@ -116,6 +116,7 @@ class PipelineRun(Base):
 
     profile_version: Mapped[ProfileVersion] = relationship()
     stages: Mapped[list["StageResult"]] = relationship(order_by="StageResult.id", cascade="all, delete-orphan")
+    observables: Mapped[list["Observable"]] = relationship(order_by="Observable.id", cascade="all, delete-orphan")
 
 
 class StageResult(Base):
@@ -133,3 +134,18 @@ class StageResult(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column(Integer)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Observable(Base):
+    """One extracted item (command line, registry key, ...) with the quote that supports it."""
+
+    __tablename__ = "observables"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("pipeline_runs.id", ondelete="CASCADE"), index=True)
+    field_name: Mapped[str] = mapped_column(String(50))
+    value: Mapped[str] = mapped_column(Text)
+    evidence: Mapped[str] = mapped_column(Text)
+    # False when the quote could not be found in the article: shown as a warning, excluded from rule generation.
+    evidence_verified: Mapped[bool] = mapped_column()
+    tags: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)

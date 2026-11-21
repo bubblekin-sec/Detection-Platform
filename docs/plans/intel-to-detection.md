@@ -1,6 +1,23 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: increments 1 to 4 done. Increment 5 (extraction) is next.
+Status: increments 1 to 5 done. Increment 6 (rule generation) is next.
+
+**5 notes (extraction).**
+- **The output schema is generated from the profile** (`extraction_schema`): one list per `extract_fields` entry. Each item has `value`, `evidence` and one typed field per tag; `platform` is an enum, and `telemetry_category` carries the increment 1 guidance on which Sigma categories convert. A new team profile gets its own schema with no code change.
+- **Extraction model:**
+  - `claude-opus-5-5` at effort `medium` (`EXTRACTION_EFFORT`), with server-side refusal fallbacks (`fallbacks="default"`, beta `server-side-fallback-2026-07-01`), because malware command lines can trip safety classifiers.
+  - It only runs for articles that pass relevance.
+  - The LLM timeout was raised to 300 s, and the stall threshold to 1800 s, which is above timeout × (retries + 1).
+- **Evidence check:** each value needs a verbatim quote. The worker checks the quote against the article text (whitespace- and case-insensitive). Unverified items are kept but flagged (`evidence_verified=false`), shown with a warning in the UI, and will be excluded from rule generation. Duplicate values within a field are merged.
+- **Data:** an `observables` table (migration 0005), returned with each run.
+- **Hardening from review:**
+  - **Only `<` is escaped** in the article sent to the model. That is enough to stop `</article>` breakout, and command lines keep `&`, `>` and `2>&1` intact. A model-echoed `&lt;` is turned back into `<`.
+  - **Evidence counts as verified only if** the quote is in the article *and* contains the value.
+  - **Duplicates are merged on whitespace- and case-normalised values. NUL is stripped.**
+  - **After a refusal fallback**, the answer is read from the text after the last `fallback` block. The stage records the model that actually served it, and `fallback_from`.
+  - **Profile field and tag names** can't shadow pydantic's model API (`model_*`, `copy`, …).
+- **Known risk:** extraction is a non-streaming request with a 300 s timeout, and the SDK retries timeouts twice. A very long Opus response could be billed up to 3 times before the run fails. If real runs come near the limit, switch extraction to streaming.
+- **Not verified yet:** real Opus extraction quality on real articles, which needs the API key.
 
 **4 notes (profiles, runs, worker, relevance).**
 - **The detection profile is seeded as v1** from `app/profiles/seed_data/detection.yaml`. Profile versions are immutable, and every run records the version it used. The relevance prompt is compiled from the profile's `audience`, `relevant_if` and `ignore_if`, and is stored on each stage result for the later "advanced view".
@@ -16,7 +33,7 @@ Status: increments 1 to 4 done. Increment 5 (extraction) is next.
   - Tested against canned responses through `httpx2.MockTransport` (`tests/test_anthropic_client.py`).
 - **Article input:** XML-escaped, so it cannot close `<article>` and pose as instructions. Capped at 100k characters; the stage output records `article_truncated`.
 - **Relevance:**
-  - Uses `claude-haiku-5-5` at effort `low` with structured outputs (`messages.parse`). Scores are clamped to 0–10 and compared with the profile's `min_score` (6).
+  - Uses `claude-haiku-5-5` at effort `low` with structured outputs (a JSON schema on `messages.create`). Scores are clamped to 0–10 and compared with the profile's `min_score` (6).
   - Refusals, API errors and output-limit hits fail the run with a readable message, never a secret.
   - Token usage is stored per stage.
 - **Credentials:** only the worker builds an LLM client. With no key it refuses to start (exit 2, actionable message), and the API keeps working. `LLM_PROVIDER=offline` lets the UI and worker run end to end at no cost.
@@ -69,7 +86,7 @@ Reference design: [Huntable-CTI-Studio](https://github.com/dfirtnt/Huntable-CTI-
 | Output | Sigma rules + KQL for **Microsoft Defender XDR Advanced Hunting** (Device* tables) from day one |
 | KQL approach | Sigma is the rule of record. Each rule has one or more **query artifacts** per target (`defender_xdr`), each tagged with an `origin`: `converted` (pySigma Kusto backend + Microsoft XDR pipeline, deterministic), `llm` (LLM-written from the Sigma and evidence), or `human_edit`. A per-profile `query_strategy` chooses `converted`, `llm`, `converted_with_llm_fallback` (default: the LLM writes KQL only when conversion fails, e.g. DNS, service install, scheduled task) or `both` (shown side by side). LLM KQL is checked against the Defender XDR table and column catalog before review. A syntax check against real Defender is done only at enterprise handoff. |
 | LLM | One `LLMClient` interface, chosen by settings. Anthropic first; an approved enterprise provider (e.g. Azure OpenAI) later. Tests never call a real LLM. |
-| Models (decided 2026-11-21) | **Relevance: `claude-haiku-5-5`** (cheap triage, about $1 per 750 articles). **Extraction and rule generation: `claude-opus-5-5`.** Each stage's model is a setting, so it can change without code. JSON comes back through structured outputs (`messages.parse` with pydantic). Opus calls use server-side refusal fallbacks, since threat content can trip cyber safety classifiers. |
+| Models (decided 2026-11-21) | **Relevance: `claude-haiku-5-5`** (cheap triage, about $1 per 750 articles). **Extraction and rule generation: `claude-opus-5-5`.** Each stage's model is a setting, so it can change without code. JSON comes back through structured outputs (a JSON schema generated from pydantic, sent with `messages.create`). Opus calls use server-side refusal fallbacks, since threat content can trip cyber safety classifiers. |
 | Run trigger | **Manual.** "Run detection" on an article, or a CLI batch. Nothing runs automatically after a fetch, so spend happens only on request. |
 | Credentials | The user puts `ANTHROPIC_API_KEY` in `api/.env` (gitignored). The app never logs it. The test suite forces the fake LLM. |
 | MVP scope | Ingest → junk filter → relevance → extraction → Sigma + KQL → human review → YAML export |
@@ -118,7 +135,7 @@ Platform detection is the `platform` tag on each observable, not a separate stag
 - `profile_versions`: profile_id, version, `definition` JSONB, UNIQUE(profile_id, version). **Immutable.**
 - `pipeline_runs`: article_id, profile_version_id, status (`queued|running|filtered_out|succeeded|failed`), current_step, error, llm_provider, llm_model, timestamps
 - `stage_results`: run_id, stage, status, `output` JSONB, compiled_prompt, token usage, timestamps
-- `observables`: run_id, field_name, value, evidence_excerpt, `tags` JSONB
+- `observables`: run_id, field_name, value, evidence, evidence_verified, `tags` JSONB
 - `detection_rules`: id UUID (= Sigma `id`), run_id, article_id, group_key JSONB, title, sigma_yaml, sigma_hash, sigma_valid, validation_errors JSONB, status (`pending_review|approved|rejected`), reviewer_note, reviewed_at
 - `rule_queries`: id, rule_id, target (`defender_xdr`; later e.g. `sentinel`, `splunk`), origin (`converted|llm|human_edit`), query_text NULL, status (`ok|failed`), error NULL, warnings JSONB (lint and schema findings), source_sigma_hash (the artifact is stale when this differs from the rule's `sigma_hash`), llm_model NULL, created_at. Adding a new SIEM target or strategy adds rows, not columns.
 - `detection_rule_observables`: join table
@@ -160,7 +177,7 @@ docker-compose.yml  THIRD_PARTY_NOTICES.md
 | 2b | UI scaffold + Sources page | The table renders, and a 422 shows as a field error |
 | 3 | Fetch now → articles (RSS, dedup, junk filter) | Re-fetch reports duplicates. A short item counts as `too_short`. A broken feed sets `last_error` and creates no rows. |
 | 4 | Profiles, runs, worker, relevance | A low score ends the run as `filtered_out` after one LLM call. Two workers never claim the same run. A missing API key fails startup without leaking it. |
-| 5 | Extraction | Unknown fields or missing evidence are rejected. Observables are saved with their tags. |
+| 5 | Extraction (done) | Observables are saved with their tags. Quotes not found in the article, or that do not contain the value, are kept but flagged unverified and excluded from rules. |
 | 6 | Rule generation (Sigma + `converted` query artifacts + KQL lint warnings) | 2 observable groups give 2 LLM calls and 2 rules. Invalid output twice gives no rule and saved errors. An unconvertible rule saves a `failed` artifact with its reason. A registry rule with a trailing backslash gets a lint warning. |
 | 6b | LLM-written KQL (`query_strategy`, Defender XDR schema check) | A DNS rule under `converted_with_llm_fallback` makes exactly one KQL LLM call and saves an `llm` artifact. A query naming a nonexistent column is saved `failed` with that column listed. Under `converted`, the KQL LLM is never called. |
 | 7 | Review screen (`GET /api/rules`, `PATCH /api/rules/{id}`, KQL edit gives a `human_edit` artifact) | An invalid Sigma edit returns 422 and the stored rule is unchanged. A Sigma edit regenerates `converted` and marks the `llm` artifact stale. |

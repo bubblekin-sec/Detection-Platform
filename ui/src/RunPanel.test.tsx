@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
@@ -17,6 +17,7 @@ const base: PipelineRun = {
   started_at: null,
   finished_at: null,
   stages: [],
+  observables: [],
 }
 
 function relevance(score: number, status: 'passed' | 'filtered') {
@@ -32,6 +33,13 @@ function relevance(score: number, status: 'passed' | 'filtered') {
     started_at: '2026-11-21T12:00:01Z',
     finished_at: '2026-11-21T12:00:03Z',
   }
+}
+
+const extractionStage = {
+  ...relevance(0, 'passed'),
+  stage: 'extraction',
+  output: { total: 0, unverified: 0, counts: {} },
+  model: 'claude-opus-5-5',
 }
 
 describe('RunPanel', () => {
@@ -85,6 +93,58 @@ describe('RunPanel', () => {
     render(<RunPanel articleId={10} pollMs={5} />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Failed at relevance: Rate limited by the Anthropic API (429)')
+  })
+
+  it('lists extracted observables by field and warns about unverified evidence', async () => {
+    const extracted: PipelineRun = {
+      ...base,
+      status: 'succeeded',
+      current_step: 'extraction',
+      stages: [relevance(8, 'passed'), extractionStage],
+      observables: [
+        {
+          id: 1,
+          field_name: 'scheduled_tasks',
+          value: 'schtasks /create /tn Updater /tr C:\\Users\\Public\\u.exe',
+          evidence: 'The operators ran schtasks /create /tn Updater on each host.',
+          evidence_verified: true,
+          tags: { platform: 'windows', telemetry_category: 'process_creation' },
+        },
+        {
+          id: 2,
+          field_name: 'network_indicators',
+          value: 'evil.example.net',
+          evidence: 'beaconed to evil.example.net',
+          evidence_verified: false,
+          tags: { platform: 'windows', telemetry_category: 'network_connection' },
+        },
+      ],
+    }
+    fakeApi({ 'GET /api/articles/10/runs': () => ({ status: 200, body: [extracted] }) })
+
+    render(<RunPanel articleId={10} pollMs={5} />)
+
+    expect(await screen.findByRole('heading', { name: 'Scheduled tasks (1)' })).toBeInTheDocument()
+    expect(screen.getByText('schtasks /create /tn Updater /tr C:\\Users\\Public\\u.exe')).toBeInTheDocument()
+    expect(screen.getByText('telemetry category: process_creation')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Network indicators (1)' })).toBeInTheDocument()
+    const [taskItem, networkItem] = screen.getAllByRole('listitem').filter((li) => li.querySelector('code'))
+    expect(within(networkItem).getByText(/Unverified:/)).toBeInTheDocument()
+    expect(within(taskItem).queryByText(/Unverified:/)).not.toBeInTheDocument()
+    expect(screen.getByText(/2 observables, 1 unverified · claude-opus-5-5/)).toBeInTheDocument()
+  })
+
+  it('says when a relevant article had nothing to extract', async () => {
+    fakeApi({
+      'GET /api/articles/10/runs': () => ({
+        status: 200,
+        body: [{ ...base, status: 'succeeded', current_step: 'extraction', stages: [relevance(7, 'passed'), extractionStage] }],
+      }),
+    })
+
+    render(<RunPanel articleId={10} pollMs={5} />)
+
+    expect(await screen.findByText(/No observables were extracted/)).toBeInTheDocument()
   })
 
   it('stops polling once the run finishes', async () => {

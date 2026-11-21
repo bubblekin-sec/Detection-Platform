@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 
-import { describeError, getRun, listArticleRuns, queueRun, type PipelineRun, type StageResult } from './api'
+import {
+  describeError,
+  getRun,
+  listArticleRuns,
+  queueRun,
+  type Observable,
+  type PipelineRun,
+  type StageResult,
+} from './api'
 
 const ACTIVE = new Set(['queued', 'running'])
 
@@ -113,6 +121,63 @@ export function RunPanel({ articleId, pollMs = 2000 }: { articleId: number; poll
           </p>
         </div>
       )}
+      {run && <Observables run={run} />}
     </section>
+  )
+}
+
+function fieldLabel(name: string): string {
+  const words = name.replace(/_/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+function Observables({ run }: { run: PipelineRun }) {
+  const extraction = run.stages.find((stage) => stage.stage === 'extraction' && stage.status === 'passed')
+  if (!extraction) return null
+  if (run.observables.length === 0) {
+    return <p className="muted">No observables were extracted: the article had no concrete detail for the profile’s fields.</p>
+  }
+  const groups = new Map<string, Observable[]>()
+  for (const item of run.observables) {
+    groups.set(item.field_name, [...(groups.get(item.field_name) ?? []), item])
+  }
+  const unverified = run.observables.filter((item) => !item.evidence_verified).length
+
+  return (
+    <div className="observables">
+      <p className="muted small">
+        {run.observables.length} observables, {unverified} unverified · {tokens(extraction)}
+      </p>
+      {[...groups].map(([field, items]) => (
+        <section key={field} className="observable-group">
+          <h3>
+            {fieldLabel(field)} ({items.length})
+          </h3>
+          <ul>
+            {items.map((item) => (
+              <li key={item.id} className={item.evidence_verified ? undefined : 'unverified'}>
+                <code className="observable-value">{item.value}</code>
+                <blockquote>{item.evidence}</blockquote>
+                {!item.evidence_verified && (
+                  <p className="warning">
+                    <strong>Unverified:</strong> the quote was not found in the article, or does not contain this
+                    value. It will not be used for rules.
+                  </p>
+                )}
+                {Object.keys(item.tags).length > 0 && (
+                  <p className="tag-row">
+                    {Object.entries(item.tags).map(([tag, value]) => (
+                      <span key={tag} className="observable-tag">
+                        {tag.replace(/_/g, ' ')}: {value}
+                      </span>
+                    ))}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
   )
 }

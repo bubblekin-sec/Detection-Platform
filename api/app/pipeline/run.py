@@ -9,16 +9,17 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
 from app.llm.client import LLMClient, LLMError
-from app.models import ACTIVE_RUN_CONSTRAINT, Article, PipelineRun, ProfileVersion, Source, StageResult
+from app.models import ACTIVE_RUN_CONSTRAINT, Article, Observable, PipelineRun, ProfileVersion, Source, StageResult
 from app.pipeline.junk import junk_reason
-from app.profiles.compile import compile_relevance, render_article
-from app.profiles.schema import ProfileDefinition, RelevanceVerdict
+from app.profiles.compile import compile_extraction, compile_relevance, render_article, unescape_markup
+from app.profiles.schema import ProfileDefinition, RelevanceVerdict, extraction_schema
 
 log = logging.getLogger(__name__)
 ACTIVE_STATUSES = ("queued", "running")
@@ -162,14 +163,94 @@ def _execute(session_factory: sessionmaker[Session], llm: LLMClient, settings: S
         model=result.model, input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
         cache_read_tokens=result.usage.cache_read_tokens, started_at=started, finished_at=clock(),
     ))
-    # Extraction (increment 5) and rule generation (increment 6) will continue from here.
-    _finish(session_factory, run_id, "succeeded" if passed else "filtered_out", "relevance", clock())
+    if not passed:
+        _finish(session_factory, run_id, "filtered_out", "relevance", clock())
+        return
+
+    # Stage 3: extraction of the profile's fields, each value backed by a quote that is checked against the text.
+    _set_step(session_factory, run_id, "extraction")
+    system = compile_extraction(definition)
+    started = clock()
+    try:
+        result = llm.complete_json(
+            model=settings.extraction_model,
+            system=system,
+            user=article_input.text,
+            schema=extraction_schema(definition),
+            effort=settings.extraction_effort,
+            max_tokens=16000,
+            fallbacks=True,
+        )
+    except LLMError as error:
+        _record(session_factory, run_id, StageResult(
+            stage="extraction", status="failed", output={"error": str(error)}, compiled_prompt=system,
+            model=settings.extraction_model, started_at=started, finished_at=clock(),
+        ))
+        _finish(session_factory, run_id, "failed", "extraction", clock(), error=str(error))
+        return
+
+    observables = collect_observables(result.output, definition, text)
+    counts = {field.name: sum(1 for item in observables if item.field_name == field.name) for field in definition.extract_fields}
+    unverified = sum(1 for item in observables if not item.evidence_verified)
+    _record(
+        session_factory,
+        run_id,
+        StageResult(
+            stage="extraction", status="passed",
+            output={"counts": counts, "total": len(observables), "unverified": unverified}
+            | ({"fallback_from": result.fallback_from} if result.fallback_from else {}),
+            compiled_prompt=system, model=result.model, input_tokens=result.usage.input_tokens,
+            output_tokens=result.usage.output_tokens, cache_read_tokens=result.usage.cache_read_tokens,
+            started_at=started, finished_at=clock(),
+        ),
+        observables=observables,
+    )
+    # Rule generation (increment 6) continues from here.
+    _finish(session_factory, run_id, "succeeded", "extraction", clock())
 
 
-def _record(session_factory: sessionmaker[Session], run_id: int, stage: StageResult) -> None:
+def collect_observables(extraction: BaseModel, definition: ProfileDefinition, article_text: str) -> list[Observable]:
+    """Flatten the model's output into rows: duplicates merged, evidence checked against the article."""
+    haystack = _normalize(article_text)
+    rows: list[Observable] = []
+    seen: set[tuple[str, str]] = set()
+    for field in definition.extract_fields:
+        for item in getattr(extraction, field.name):
+            value, evidence = _clean(item.value), _clean(item.evidence)
+            key = (field.name, _normalize(value))
+            if not value or key in seen:
+                continue
+            seen.add(key)
+            # Verified only if the quote is really in the article AND actually contains the value.
+            verified = bool(evidence) and _normalize(value) in _normalize(evidence) and _normalize(evidence) in haystack
+            rows.append(Observable(
+                field_name=field.name,
+                value=value,
+                evidence=evidence,
+                evidence_verified=verified,
+                tags={tag: _clean(str(getattr(item, tag))) for tag in field.tags},
+            ))
+    return rows
+
+
+def _clean(text: str) -> str:
+    """Undo the "<" escaping the model saw, and drop NUL (PostgreSQL text and JSONB reject it)."""
+    return unescape_markup(text).replace("\x00", "").strip()
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
+
+def _record(
+    session_factory: sessionmaker[Session], run_id: int, stage: StageResult, *, observables: list[Observable] | None = None
+) -> None:
     with session_factory() as session:
         stage.run_id = run_id
         session.add(stage)
+        for observable in observables or []:
+            observable.run_id = run_id
+            session.add(observable)
         session.execute(update(PipelineRun).where(PipelineRun.id == run_id).values(heartbeat_at=stage.finished_at))
         session.commit()
 

@@ -66,6 +66,15 @@ export interface StageResult {
   finished_at: string
 }
 
+export interface Observable {
+  id: number
+  field_name: string
+  value: string
+  evidence: string
+  evidence_verified: boolean
+  tags: Record<string, string>
+}
+
 export interface PipelineRun {
   id: number
   article_id: number
@@ -77,6 +86,7 @@ export interface PipelineRun {
   started_at: string | null
   finished_at: string | null
   stages: StageResult[]
+  observables: Observable[]
 }
 
 /** The API returns every 4xx as {"detail": {"errors": ["field: message" | "message"]}}. */

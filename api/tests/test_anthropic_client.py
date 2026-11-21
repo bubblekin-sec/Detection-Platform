@@ -85,8 +85,88 @@ def test_authentication_failure_points_at_the_key_setting_without_echoing_it():
     assert "test-key-not-real" not in str(raised.value)
 
 
+def test_fallbacks_use_the_beta_endpoint_with_default_routing():
+    seen_bodies: list = []
+    seen_headers: list = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen_bodies.append(json.loads(request.content))
+        seen_headers.append(request.headers.get("anthropic-beta", ""))
+        return httpx2.Response(200, json=message(VALID), headers={"request-id": "req_9"})
+
+    client = AnthropicLLMClient(
+        api_key="test-key-not-real", timeout_seconds=5, max_retries=0,
+        http_client=httpx2.Client(transport=httpx2.MockTransport(handler)),
+    )
+
+    result = client.complete_json(
+        model="claude-opus-5-5", system="sys", user="usr", schema=RelevanceVerdict, effort="medium", fallbacks=True
+    )
+
+    assert result.output.score == 7
+    assert seen_bodies[0]["fallbacks"] == "default"
+    assert "server-side-fallback-2026-07-01" in seen_headers[0]
+
+
+def test_without_fallbacks_no_beta_header_is_sent():
+    seen_headers: list = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen_headers.append(request.headers.get("anthropic-beta"))
+        return httpx2.Response(200, json=message(VALID))
+
+    client = AnthropicLLMClient(
+        api_key="test-key-not-real", timeout_seconds=5, max_retries=0,
+        http_client=httpx2.Client(transport=httpx2.MockTransport(handler)),
+    )
+    call(client)
+
+    assert seen_headers == [None]
+
+
 def test_api_error_messages_keep_their_reason():
     body = {"type": "error", "error": {"type": "invalid_request_error", "message": "prompt is too long: 1200000 tokens > 1000000"}}
 
     with pytest.raises(LLMError, match="400.*prompt is too long"):
         call(client_returning(400, body))
+
+
+def test_after_a_fallback_the_final_models_text_is_used():
+    declined_then_served = message(None)
+    declined_then_served["content"] = [
+        {"type": "text", "text": '{"score": 2, "ratio'},
+        {
+            "type": "fallback",
+            "from": {"model": "claude-opus-5-5"},
+            "to": {"model": "claude-opus-4-8"},
+            "trigger": {"type": "refusal", "category": "cyber"},
+        },
+        {"type": "text", "text": VALID},
+    ]
+
+    client = client_returning(200, declined_then_served)
+    result = client.complete_json(
+        model="claude-opus-5-5", system="sys", user="usr", schema=RelevanceVerdict, fallbacks=True
+    )
+
+    assert result.output.score == 7
+    assert (result.model, result.fallback_from) == ("claude-opus-4-8", "claude-opus-5-5")
+
+
+def test_the_generated_extraction_schema_is_accepted_by_the_sdk_transform():
+    import anthropic
+    import yaml
+
+    from app.profiles.schema import ProfileDefinition, extraction_schema
+
+    definition = ProfileDefinition.model_validate(
+        yaml.safe_load(open("app/profiles/seed_data/detection.yaml", encoding="utf-8"))["definition"]
+    )
+    schema = anthropic.transform_schema(extraction_schema(definition))
+
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == set(schema["properties"])
+    for name, item in schema["$defs"].items():
+        assert item["additionalProperties"] is False, name
+        assert set(item["required"]) == set(item["properties"]), name
+        assert item["properties"]["platform"]["enum"] == ["windows", "linux", "macos", "unknown"]

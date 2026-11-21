@@ -19,7 +19,15 @@ class OfflineLLMClient:
     provider = "offline"
 
     def complete_json[T: BaseModel](
-        self, *, model: str, system: str, user: str, schema: type[T], effort: Effort | None = None, max_tokens: int = 16000
+        self,
+        *,
+        model: str,
+        system: str,
+        user: str,
+        schema: type[T],
+        effort: Effort | None = None,
+        max_tokens: int = 16000,
+        fallbacks: bool = False,
     ) -> LLMResult[T]:
         raise LLMError("LLM_PROVIDER is 'offline', so no model was called. Add ANTHROPIC_API_KEY to api/.env.")
 

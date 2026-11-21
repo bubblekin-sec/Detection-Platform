@@ -12,6 +12,7 @@ from pydantic import BaseModel, ValidationError
 from app.llm.client import Effort, LLMError, LLMRefusal, LLMResult, LLMUsage
 
 MAX_ERROR_DETAIL = 300
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 class AnthropicLLMClient:
@@ -34,18 +35,25 @@ class AnthropicLLMClient:
         schema: type[T],
         effort: Effort | None = None,
         max_tokens: int = 16000,
+        fallbacks: bool = False,
     ) -> LLMResult[T]:
         output_config: dict = {"format": {"type": "json_schema", "schema": anthropic.transform_schema(schema)}}
         if effort:
             output_config["effort"] = effort
+        request = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+            "output_config": output_config,
+        }
         try:
-            response = self._client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                system=system,
-                messages=[{"role": "user", "content": user}],
-                output_config=output_config,
-            )
+            if fallbacks:
+                # Threat content can trip safety classifiers; on a decline the API re-runs the request on a
+                # fallback model chosen by refusal category ("default"), inside the same call.
+                response = self._client.beta.messages.create(**request, betas=[FALLBACK_BETA], fallbacks="default")
+            else:
+                response = self._client.messages.create(**request)
         except anthropic.AuthenticationError as error:
             raise LLMError("Anthropic rejected the API key (401). Check ANTHROPIC_API_KEY in api/.env.") from error
         except anthropic.PermissionDeniedError as error:
@@ -67,7 +75,16 @@ class AnthropicLLMClient:
             raise LLMRefusal(f"The model declined this request (category: {category or 'unspecified'}).")
         if response.stop_reason == "max_tokens":
             raise LLMError(f"The response hit the {max_tokens}-token limit before finishing.")
-        text = next((block.text for block in response.content if block.type == "text"), None)
+        # After a fallback, content holds the declined model's partial output, a fallback block, then the
+        # served model's output: only text after the last fallback block is the answer.
+        blocks = list(response.content)
+        fallback_indexes = [index for index, block in enumerate(blocks) if block.type == "fallback"]
+        answer_blocks = blocks[fallback_indexes[-1] + 1 :] if fallback_indexes else blocks
+        text = next((block.text for block in answer_blocks if block.type == "text"), None)
+        served_model, fallback_from = response.model, None
+        if fallback_indexes:
+            last = blocks[fallback_indexes[-1]]
+            served_model, fallback_from = _model_of(last, "to"), _model_of(blocks[fallback_indexes[0]], "from")
         if text is None:
             raise LLMError(f"No text in the response (stop_reason={response.stop_reason}).")
         try:
@@ -78,7 +95,8 @@ class AnthropicLLMClient:
         usage = response.usage
         return LLMResult(
             output=parsed,
-            model=response.model,
+            model=served_model,
+            fallback_from=fallback_from,
             usage=LLMUsage(
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
@@ -93,3 +111,11 @@ def _detail(error: anthropic.APIStatusError) -> str:
     body = error.body if isinstance(error.body, dict) else {}
     message = (body.get("error") or {}).get("message") or error.message or ""
     return message[:MAX_ERROR_DETAIL]
+
+
+def _model_of(block, side: str) -> str | None:
+    """Model id from a fallback block's `from`/`to` (typed on the beta endpoint, a dict if parsed loosely)."""
+    info = getattr(block, "from_" if side == "from" else side, None)
+    if info is None and isinstance(block, dict):
+        info = block.get(side)
+    return getattr(info, "model", None) or (info.get("model") if isinstance(info, dict) else None)

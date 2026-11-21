@@ -41,13 +41,16 @@ class ScriptedLLM:
         self.queued: dict[str, list] = {}
         self.calls: list[dict] = []
 
-    def queue(self, schema: type, *outputs) -> None:
-        self.queued.setdefault(schema.__name__, []).extend(outputs)
+    def queue(self, schema: type | str, *outputs) -> None:
+        name = schema if isinstance(schema, str) else schema.__name__
+        self.queued.setdefault(name, []).extend(outputs)
 
-    def complete_json(self, *, model, system, user, schema, effort=None, max_tokens=8000):
+    def complete_json(self, *, model, system, user, schema, effort=None, max_tokens=16000, fallbacks=False):
         from app.llm.client import LLMResult, LLMUsage
 
-        self.calls.append({"model": model, "system": system, "user": user, "schema": schema.__name__, "effort": effort})
+        self.calls.append(
+            {"model": model, "system": system, "user": user, "schema": schema.__name__, "effort": effort, "fallbacks": fallbacks}
+        )
         pending = self.queued.get(schema.__name__) or []
         if not pending:
             raise AssertionError(f"ScriptedLLM has no queued output for {schema.__name__}")
@@ -56,5 +59,7 @@ class ScriptedLLM:
             output = output()  # a callback can probe state mid-call (locks, run status) and return the output
         if isinstance(output, BaseException):
             raise output
+        if isinstance(output, dict):  # dynamic schemas (extraction) are queued as plain data
+            output = schema.model_validate(output)
         usage = LLMUsage(input_tokens=1200, output_tokens=150, cache_read_tokens=0)
         return LLMResult(output=output, model=model, usage=usage, request_id="req_test")

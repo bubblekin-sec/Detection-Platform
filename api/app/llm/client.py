@@ -34,6 +34,7 @@ class LLMResult[T: BaseModel]:
     model: str
     usage: LLMUsage
     request_id: str | None = None
+    fallback_from: str | None = None  # the requested model, when a fallback model served the response
 
 
 class LLMClient(Protocol):
@@ -48,6 +49,10 @@ class LLMClient(Protocol):
         schema: type[T],
         effort: Effort | None = None,
         max_tokens: int = 16000,
+        fallbacks: bool = False,
     ) -> LLMResult[T]:
-        """One request; returns `schema` validated from the model's structured output, or raises LLMError."""
+        """One request; returns `schema` validated from the model's structured output, or raises LLMError.
+
+        `fallbacks`: let the provider retry a safety refusal on a fallback model, where it supports that.
+        """
         ...

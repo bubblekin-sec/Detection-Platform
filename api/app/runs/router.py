@@ -34,6 +34,17 @@ class StageOut(BaseModel):
     finished_at: datetime
 
 
+class ObservableOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    field_name: str
+    value: str
+    evidence: str
+    evidence_verified: bool
+    tags: dict[str, Any]
+
+
 class ProfileRef(BaseModel):
     slug: str
     version: int
@@ -50,6 +61,7 @@ class RunOut(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     stages: list[StageOut]
+    observables: list[ObservableOut]
 
 
 def _out(run: PipelineRun) -> RunOut:
@@ -64,6 +76,7 @@ def _out(run: PipelineRun) -> RunOut:
         started_at=run.started_at,
         finished_at=run.finished_at,
         stages=[StageOut.model_validate(stage) for stage in run.stages],
+        observables=[ObservableOut.model_validate(item) for item in run.observables],
     )
 
 
@@ -71,7 +84,7 @@ def _load(session: Session, run_id: int) -> PipelineRun | None:
     return session.scalars(
         select(PipelineRun)
         .where(PipelineRun.id == run_id)
-        .options(selectinload(PipelineRun.stages), joinedload(PipelineRun.profile_version).joinedload(ProfileVersion.profile))
+        .options(selectinload(PipelineRun.stages), selectinload(PipelineRun.observables), joinedload(PipelineRun.profile_version).joinedload(ProfileVersion.profile))
         .execution_options(populate_existing=True)
     ).first()
 
@@ -103,7 +116,7 @@ def list_article_runs(article_id: int, session: SessionDep) -> list[RunOut]:
     runs = session.scalars(
         select(PipelineRun)
         .where(PipelineRun.article_id == article_id)
-        .options(selectinload(PipelineRun.stages), joinedload(PipelineRun.profile_version).joinedload(ProfileVersion.profile))
+        .options(selectinload(PipelineRun.stages), selectinload(PipelineRun.observables), joinedload(PipelineRun.profile_version).joinedload(ProfileVersion.profile))
         .order_by(PipelineRun.id.desc())
         .limit(20)
     ).all()
