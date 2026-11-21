@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import Settings
 from app.articles.router import router as articles_router
+from app.dashboard.router import router as dashboard_router
 from app.db import make_engine, make_session_factory
 from app.detection.router import router as detection_router
 from app.profiles.router import router as profiles_router
@@ -57,6 +58,7 @@ def create_app(settings: Settings | None = None, *, fetcher: Fetcher | None = No
     app.include_router(runs_router)
     app.include_router(rules_router)
     app.include_router(profiles_router)
+    app.include_router(dashboard_router)
     return app
 
 

@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.db import get_session
@@ -95,6 +95,13 @@ def list_rules(
         query = query.where(DetectionRule.status == status)
     query = query.order_by(DetectionRule.created_at.desc(), DetectionRule.run_id.desc(), DetectionRule.position).limit(limit)
     return [_detail(rule, article) for rule, article in session.execute(query)]
+
+
+@router.get("/counts")
+def rule_counts(session: SessionDep) -> dict[str, int]:
+    """Rules per review status (declared before /{rule_id} so "counts" is not read as an id)."""
+    counts = dict(session.execute(select(DetectionRule.status, func.count()).group_by(DetectionRule.status)).all())
+    return {status: counts.get(status, 0) for status in RULE_STATUSES}
 
 
 @router.get("/{rule_id}", response_model=RuleDetail)

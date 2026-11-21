@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     report.add_argument("--drop", action="append", default=[], metavar="TERM", help="Also drop this term (repeatable).")
     rescore = commands.add_parser("score-articles", help="Store priority scores for the profile's latest version. Never queues runs.")
     rescore.add_argument("--profile", default="detection")
-    rescore.add_argument("--missing", action="store_true", help="Only articles without a score for that version.")
+    rescore.add_argument("--missing", action="store_true", help="Only articles with no current score for that version (unscored, or scored by an older scorer).")
     args = parser.parse_args(argv)
 
     settings = Settings()

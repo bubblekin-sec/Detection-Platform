@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.models import Article, DetectionRule, PipelineRun, Source
+from app.models import Article, DetectionRule, PipelineRun, ProfileVersion, Source
 from app.pipeline.scoring import score_articles
 from app.profiles.seed import latest_version, seed_profiles
 
@@ -43,8 +43,8 @@ def articles(db_session) -> dict[str, Article]:
     return items
 
 
-def add_run(db_session, article: Article, status: str, *, rules: int = 0) -> None:
-    version = latest_version(db_session, "detection")
+def add_run(db_session, article: Article, status: str, *, rules: int = 0, version: ProfileVersion | None = None) -> None:
+    version = version or latest_version(db_session, "detection")
     run = PipelineRun(article_id=article.id, profile_version_id=version.id, status=status, trigger="auto")
     db_session.add(run)
     db_session.flush()
@@ -88,6 +88,7 @@ def test_filter_by_band_and_minimum_score(api, articles):
 
     assert titles(api.get(f"/api/articles?band={high_band.replace(' ', '%20')}")) == ["High report"]
     assert titles(api.get("/api/articles?min_score=37.5&sort=priority")) == ["High report", "Mid report"]
+    assert titles(api.get("/api/articles?band=Very%20Poor")) == ["Low report"]  # the lowest band has no upper bound
     assert api.get("/api/articles?band=Bogus").status_code == 422
 
 
@@ -125,3 +126,60 @@ def test_paging(api, articles):
 def test_unknown_profile_or_sort_is_rejected(api, articles):
     assert api.get("/api/articles?sort=bogus").status_code == 422
     assert api.get("/api/articles?profile=nope").status_code == 404
+
+
+def test_band_filter_excludes_scores_in_higher_bands(api, articles):
+    high_band = api.get("/api/articles").json()[0]["priority"]["band"]
+    lower = {"Excellent": "Good", "Good": "Fair"}[high_band]
+
+    assert "High report" not in titles(api.get(f"/api/articles?band={lower}"))
+
+
+def test_runs_under_an_older_profile_version_still_count(api, articles, db_session):
+    current = latest_version(db_session, "detection")
+    older = ProfileVersion(profile_id=current.profile_id, version=1, definition=current.definition)
+    db_session.add(older)
+    db_session.commit()
+    add_run(db_session, articles["low"], "succeeded", rules=1, version=older)
+
+    by_title = {item["title"]: item["pipeline"]["status"] for item in api.get("/api/articles").json()}
+
+    assert by_title["Low report"] == "rules"
+
+
+def test_sort_by_source_is_a_to_z_by_default_and_honours_order(api, articles, db_session):
+    other = Source(slug="alpha", name="Alpha Labs", url="https://a.example.com/", rss_url="https://a.example.com/f",
+                   active=True, check_frequency_seconds=3600, config={}, origin="user")
+    db_session.add(other)
+    db_session.flush()
+    for n in range(3):  # same source, no published date: only the id tie-break orders these
+        db_session.add(Article(source_id=other.id, url=f"https://a.example.com/{n}", title=f"Alpha {n}",
+                               content_text="text", content_hash=f"a{n}", word_count=1))
+    db_session.commit()
+
+    ascending = titles(api.get("/api/articles?sort=source"))
+    assert ascending[:3] == ["Alpha 2", "Alpha 1", "Alpha 0"] and ascending[3] == "High report"
+    assert titles(api.get("/api/articles?sort=source&order=desc"))[0] == "High report"
+    pages = [titles(api.get(f"/api/articles?sort=source&limit=1&offset={n}"))[0] for n in range(7)]
+    assert pages == ascending
+
+
+def test_order_must_be_asc_or_desc(api, articles):
+    assert api.get("/api/articles?order=sideways").status_code == 422
+
+
+def test_list_and_detail_work_before_any_profile_is_seeded(api, db_session):
+    source = Source(slug="s", name="S", url="https://s.example.com/", rss_url="https://s.example.com/f",
+                    active=True, check_frequency_seconds=3600, config={}, origin="user")
+    db_session.add(source)
+    db_session.flush()
+    item = Article(source_id=source.id, url="https://s.example.com/1", title="Lone", content_text="text",
+                   content_hash="x", word_count=1)
+    db_session.add(item)
+    db_session.commit()
+
+    (listed,) = api.get("/api/articles").json()
+    detail = api.get(f"/api/articles/{item.id}").json()
+
+    assert listed["priority"] is None and listed["pipeline"]["status"] == "not_run"
+    assert detail["priority"] is None and detail["pipeline"] is None

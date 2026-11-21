@@ -1,6 +1,6 @@
 # Plan: priority scoring, gated model use, workbench UI, then 6b
 
-Status: P1–P4 done (P4 to be reviewed with P5/P6), P5 next.
+Status: P1–P7 and P10 done, P8 (article queue UI) next.
 
 **P2/P3 notes.**
 - Detection profile v2 (`detection.yaml` `version: 2`) expands `priority: {source: huntable_keyword_registry, threshold: 37.5}` into concrete lists at seed time, so the stored version is self-contained. Seeding adds a higher seed version beside existing ones and never edits them.
@@ -81,3 +81,14 @@ Status: P1–P4 done (P4 to be reviewed with P5/P6), P5 next.
 - Cache-creation tokens aren't stored, so spend is slightly under-reported. `rule_generation` records the configured model even when a fallback served the call.
 - No router or chart library: five routes and bar charts don't justify one (reconsider for nested layouts or time-axis charts).
 - After P11, a Sigma edit in review can't regenerate stale LLM-written KQL, because the API has no LLM client.
+
+## P4–P7, P10 notes
+
+- **Where scores come from.** Article detail shows the *stored* score (the one gating, the list and the dashboard used) and computes only the highlight spans on demand. With no stored score for the latest version, `priority` is null. A score from an older `SCORER_TAG` is flagged `stale`; `score-articles --missing` refreshes those.
+- **One matching rule.** Keyword spans run the scorer's own case-folded patterns and map back to the original text (`FoldedText`), so a highlighted term is always one the score counted. Evidence quotes use the same map with whitespace collapsed, built once per request.
+- **Pipeline status** has one owner, `app/pipeline/status.py`, shared by the article list, article detail and the dashboard. An article's status is its *latest* run's, so a later run with no rules shows `no_rules` even if an earlier run's rules were approved (open product question).
+- **Spend** on the dashboard is all time and all profiles; the rest of the page is per profile.
+- **Fresh install:** before `seed-profiles`, the dashboard still loads (volume, source health, spend) with `profile: null` and a hint to seed; naming an unknown profile is a 404.
+- **Links** go through `followLink` (`ui/src/routes.ts`): plain left clicks navigate in place, modified clicks are left to the browser.
+- **Sorting by source** is A to Z by default; `order` is honoured literally for every sort.
+- **Measured on 500 KB of text:** score 0.07 s, spans 0.16 s (capped at 2000, `spans_truncated`), evidence index 0.06 s, 300 quote lookups 0.01 s.

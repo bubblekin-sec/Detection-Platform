@@ -20,7 +20,7 @@ def score_articles(
     article_ids: Iterable[int] | None = None,
     missing_only: bool = False,
 ) -> int:
-    """Score articles for `version` (all, the given ids, or those without a score yet). Commits; returns the count."""
+    """Score articles for `version` (all, the given ids, or those without a current score). Commits; returns the count."""
     config = PriorityConfig.model_validate(version.definition["priority"])
     scorer = PriorityScorer(config)
     query = select(Article.id, Article.title, Article.content_text).order_by(Article.id)
@@ -30,7 +30,9 @@ def score_articles(
             return 0
         query = query.where(Article.id.in_(ids))
     if missing_only:
-        scored = select(ArticleScore.article_id).where(ArticleScore.profile_version_id == version.id)
+        scored = select(ArticleScore.article_id).where(
+            ArticleScore.profile_version_id == version.id, ArticleScore.scorer == SCORER_TAG
+        )
         query = query.where(Article.id.not_in(scored))
 
     count = 0

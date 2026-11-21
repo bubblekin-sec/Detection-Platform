@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.db import get_session
 from app.models import Article, DetectionRule, PipelineRun, ProfileVersion
+from app.pipeline.priority import FoldedText
 from app.pipeline.run import queue_run
 from app.profiles.seed import latest_version
 
@@ -43,6 +44,7 @@ class ObservableOut(BaseModel):
     evidence: str
     evidence_verified: bool
     tags: dict[str, Any]
+    evidence_span: dict[str, int] | None = None  # {start, end} UTF-16 offsets into the article text (verified only)
 
 
 class QueryOut(BaseModel):
@@ -102,7 +104,7 @@ class RunOut(BaseModel):
     rules: list[RuleOut]
 
 
-def _out(run: PipelineRun) -> RunOut:
+def _out(run: PipelineRun, article: FoldedText | None = None) -> RunOut:
     return RunOut(
         id=run.id,
         article_id=run.article_id,
@@ -114,9 +116,24 @@ def _out(run: PipelineRun) -> RunOut:
         started_at=run.started_at,
         finished_at=run.finished_at,
         stages=[StageOut.model_validate(stage) for stage in run.stages],
-        observables=[ObservableOut.model_validate(item) for item in run.observables],
+        observables=[_observable(item, article) for item in run.observables],
         rules=[rule_out(rule) for rule in run.rules],
     )
+
+
+def _observable(item, article: FoldedText | None) -> ObservableOut:
+    out = ObservableOut.model_validate(item)
+    if article is not None and item.evidence_verified:
+        found = article.find(item.evidence)
+        if found:
+            out.evidence_span = {"start": found[0], "end": found[1]}
+    return out
+
+
+def _article_text(session: Session, article_id: int) -> FoldedText | None:
+    """The article text indexed for evidence lookup: built once per request, however many observables there are."""
+    text = session.scalar(select(Article.content_text).where(Article.id == article_id))
+    return FoldedText(text, collapse_whitespace=True) if text else None
 
 
 def _load(session: Session, run_id: int) -> PipelineRun | None:
@@ -141,7 +158,7 @@ def create_run(article_id: int, body: RunCreate, session: SessionDep, response: 
     run, created = queue_run(session, article_id, version)
     if not created:
         response.status_code = 200
-    return _out(_load(session, run.id))
+    return _out(_load(session, run.id), _article_text(session, article_id))
 
 
 @router.get("/api/runs/{run_id}", response_model=RunOut)
@@ -149,7 +166,7 @@ def get_run(run_id: int, session: SessionDep) -> RunOut:
     run = _load(session, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail={"errors": [f"Run {run_id} not found."]})
-    return _out(run)
+    return _out(run, _article_text(session, run.article_id))
 
 
 @router.get("/api/articles/{article_id}/runs", response_model=list[RunOut])
@@ -163,4 +180,5 @@ def list_article_runs(article_id: int, session: SessionDep) -> list[RunOut]:
         .order_by(PipelineRun.id.desc())
         .limit(20)
     ).all()
-    return [_out(run) for run in runs]
+    text = _article_text(session, article_id)
+    return [_out(run, text) for run in runs]
