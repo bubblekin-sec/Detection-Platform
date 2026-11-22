@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
 
 import { getRuleCounts } from './api'
 import { ArticleReader, ArticlesPage } from './ArticlesPage'
@@ -44,6 +44,12 @@ export function App() {
   const page = route(location.path)
   const [pending, setPending] = useState<number | null>(null)
   const [rulesChanged, setRulesChanged] = useState(0)
+  // The queue view (sort, filters, page) the user last had, so "All articles" returns to it.
+  const queueSearch = useRef('')
+
+  useEffect(() => {
+    if (page.page === 'articles') queueSearch.current = location.search
+  }, [page.page, location.search])
 
   // Refresh the review badge when the page changes or a rule is reviewed (cheap: one count query).
   useEffect(() => {
@@ -93,10 +99,16 @@ export function App() {
           <DashboardPage onOpenArticle={(id) => navigate(`/articles/${id}`)} onNavigate={navigate} />
         )}
         {page.page === 'sources' && <SourcesPage />}
-        {page.page === 'articles' && <ArticlesPage onOpen={(id) => navigate(`/articles/${id}`)} />}
+        {page.page === 'articles' && (
+          <ArticlesPage
+            search={location.search}
+            onOpen={(id) => navigate(`/articles/${id}`)}
+            onQueryChange={(search) => navigate(`/articles${search}`)}
+          />
+        )}
         {/* key: a different article remounts the reader, so the previous one never shows under the new URL */}
         {page.page === 'article' && (
-          <ArticleReader key={page.id} id={page.id} onBack={() => navigate('/articles')} />
+          <ArticleReader key={page.id} id={page.id} onBack={() => navigate(`/articles${queueSearch.current}`)} />
         )}
         {page.page === 'review' && (
           <ReviewPage

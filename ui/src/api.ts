@@ -45,10 +45,36 @@ export interface ArticleSummary {
   word_count: number
   excerpt: string
   source: { id: number; slug: string; name: string }
+  priority?: PriorityBrief | null // null when not scored for the profile's latest version
+  pipeline?: PipelineBrief | null // the list always sends one; detail sends null before any profile exists
 }
 
-export interface ArticleDetail extends ArticleSummary {
+export type Band = 'Excellent' | 'Good' | 'Fair' | 'Poor' | 'Very Poor'
+
+export interface PriorityBrief {
+  score: number
+  band: Band
+  terms: Record<string, string[]> // keyword chips: the strong buckets (perfect, lolbas, intelligence)
+}
+
+export interface PipelineBrief {
+  status: PipelineState
+  run_id: number | null
+  rules: number
+}
+
+export interface PriorityDetail extends PriorityBrief {
+  threshold: number | null
+  profile_version: number
+  stale: boolean
+  buckets: Record<string, { terms: string[]; count: number; points: number; max_points: number }>
+  spans: { start: number; end: number; bucket: string; term: string }[] // UTF-16 offsets into content_text
+  spans_truncated: boolean
+}
+
+export interface ArticleDetail extends Omit<ArticleSummary, 'priority'> {
   content_text: string
+  priority?: PriorityDetail | null
 }
 
 export type RunStatus = 'queued' | 'running' | 'filtered_out' | 'succeeded' | 'failed'
@@ -180,8 +206,8 @@ export const listSources = () => request<Source[]>('GET', '/api/sources')
 export const createSource = (body: SourceCreate) => request<Source>('POST', '/api/sources', body)
 export const updateSource = (id: number, body: SourceUpdate) => request<Source>('PATCH', `/api/sources/${id}`, body)
 export const fetchSourceNow = (id: number) => request<FetchSummary>('POST', `/api/sources/${id}/fetch`)
-export const listArticles = (sourceId?: number) =>
-  request<ArticleSummary[]>('GET', sourceId === undefined ? '/api/articles' : `/api/articles?source_id=${sourceId}`)
+/** `query`: a query string from articleQuery.toApiQuery ('' for the default list). */
+export const listArticles = (query = '') => request<ArticleSummary[]>('GET', `/api/articles${query}`)
 export const getArticle = (id: number) => request<ArticleDetail>('GET', `/api/articles/${id}`)
 export const listArticleRuns = (articleId: number) => request<PipelineRun[]>('GET', `/api/articles/${articleId}/runs`)
 export const queueRun = (articleId: number, profile = 'detection') =>

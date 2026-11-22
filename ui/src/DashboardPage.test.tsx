@@ -87,7 +87,7 @@ describe('DashboardPage', () => {
 
     const list = await screen.findByRole('list', { name: 'Top priority articles' })
     expect(within(list).getAllByRole('listitem')).toHaveLength(2)
-    expect(within(list).getByText('Rules')).toBeInTheDocument()
+    expect(within(list).getByText('Has rules')).toBeInTheDocument()
     await user.click(within(list).getByRole('link', { name: /GeoVision Camera Software Abused/ }))
 
     expect(opened).toEqual([11])

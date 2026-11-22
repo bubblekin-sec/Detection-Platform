@@ -91,4 +91,68 @@ describe('App shell', () => {
 
     expect(await within(nav).findByRole('link', { name: 'Review' })).toBeInTheDocument()
   })
+
+  it('opens the priority queue from the dashboard', async () => {
+    fakeApi({
+      'GET /api/rules/counts': () => ({ status: 200, body: counts }),
+      'GET /api/dashboard': () => ({ status: 200, body: emptyDashboard }),
+      'GET /api/sources': () => ({ status: 200, body: [] }),
+      'GET /api/articles?sort=priority': () => ({ status: 200, body: [] }),
+    })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('link', { name: /View queue/ }))
+
+    expect(window.location.search).toBe('?sort=priority')
+    expect(await screen.findByLabelText('Sort by')).toHaveValue('priority')
+  })
+
+  it('returns from an article to the queue view the user left', async () => {
+    fakeApi({
+      'GET /api/rules/counts': () => ({ status: 200, body: counts }),
+      'GET /api/sources': () => ({ status: 200, body: [] }),
+      'GET /api/articles?sort=priority&band=Excellent': () => ({
+        status: 200,
+        body: [{ id: 5, url: 'https://x', title: 'Queued article', author: null, published_at: null,
+                 fetched_at: '2026-11-21T00:00:00Z', word_count: 10, excerpt: '', source: { id: 1, slug: 's', name: 'S' } }],
+      }),
+      'GET /api/articles/5': () => ({
+        status: 200,
+        body: { id: 5, url: 'https://x', title: 'Queued article', author: null, published_at: null,
+                fetched_at: '2026-11-21T00:00:00Z', word_count: 10, excerpt: '', source: { id: 1, slug: 's', name: 'S' },
+                content_text: 'Body.', priority: null, pipeline: null },
+      }),
+      'GET /api/articles/5/runs': () => ({ status: 200, body: [] }),
+    })
+    window.history.pushState(null, '', '/articles?sort=priority&band=Excellent')
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('link', { name: 'Queued article' }))
+    await user.click(await screen.findByRole('button', { name: /All articles/ }))
+
+    expect(window.location.search).toBe('?sort=priority&band=Excellent')
+    expect(await screen.findByLabelText('Priority band')).toHaveValue('Excellent')
+  })
+
+  it('follows browser back and forward between queue views', async () => {
+    const api = fakeApi({
+      'GET /api/rules/counts': () => ({ status: 200, body: counts }),
+      'GET /api/sources': () => ({ status: 200, body: [] }),
+      'GET /api/articles': () => ({ status: 200, body: [] }),
+      'GET /api/articles?sort=priority': () => ({ status: 200, body: [] }),
+    })
+    window.history.pushState(null, '', '/articles')
+    const user = userEvent.setup()
+    render(<App />)
+    await user.selectOptions(await screen.findByLabelText('Sort by'), 'Priority score')
+    expect(window.location.search).toBe('?sort=priority')
+
+    window.history.back()
+    await new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }))
+
+    expect(await screen.findByLabelText('Sort by')).toHaveValue('published')
+    expect(api.calls.at(-1)?.route).toBe('GET /api/articles')
+  })
 })

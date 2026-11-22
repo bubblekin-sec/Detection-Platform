@@ -150,7 +150,8 @@ h2 {
   gap: 12px;
 }
 
-.filter select {
+.filter select,
+.field select {
   font: inherit;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -1000,3 +1001,142 @@ tbody tr:last-child > * {
 .pipeline-rules { border-color: transparent; background: var(--tag-user-bg); color: var(--tag-user-text); }
 .pipeline-in_progress { border-color: transparent; background: var(--tag-seed-bg); color: var(--tag-seed-text); }
 .pipeline-failed { border-color: transparent; background: var(--danger-bg); color: var(--danger); }
+
+/* ---------- Article queue ---------- */
+.queue-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.queue-controls select {
+  min-width: 140px;
+}
+
+.article-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 14px;
+  align-items: start;
+}
+
+.article-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.score-none {
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px dashed var(--border);
+}
+
+.chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border: 1px solid var(--border);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.chip-perfect { background: var(--tag-user-bg); color: var(--tag-user-text); border-color: transparent; }
+.chip-lolbas { background: var(--tag-seed-bg); color: var(--tag-seed-text); border-color: transparent; }
+.chip-more { color: var(--muted); font-family: inherit; }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 600px) {
+  .article-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .article-state {
+    grid-column: 2;
+    flex-direction: row;
+    align-items: center;
+  }
+  .queue-controls .field {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+  .queue-controls select {
+    min-width: 0;
+  }
+}
+
+/* ---------- Article detail: highlights and priority breakdown ---------- */
+.article-text-marked {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+
+mark.hl {
+  background: none;
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+mark.hl-perfect { background: var(--tag-user-bg); color: var(--tag-user-text); }
+mark.hl-lolbas { background: var(--tag-seed-bg); color: var(--tag-seed-text); }
+mark.hl-intelligence,
+mark.hl-good { box-shadow: inset 0 -2px 0 var(--accent); }
+mark.hl-negative { box-shadow: inset 0 -2px 0 var(--danger); }
+mark.hl-evidence { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.breakdown .buckets {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 0;
+}
+
+.bucket dt {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.bucket dd {
+  margin: 4px 0 0;
+  display: grid;
+  gap: 6px;
+}
+
+.bucket meter {
+  width: 100%;
+  height: 8px;
+}
+
+.bucket-points {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chip-note {
+  color: var(--muted);
+  font-family: inherit;
+}
+
+.chip-good { color: var(--text); }
+.chip-negative { color: var(--danger); }
