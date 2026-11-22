@@ -65,6 +65,13 @@ export function RuleCard({
             <span className="muted small">({ORIGIN_LABELS[query.origin] ?? query.origin})</span>
           </h5>
           {query.stale && <p className="warning">Out of date: the Sigma changed after this query was made.</p>}
+          {query.missing_tables && query.missing_tables.length > 0 && (
+            <p className="warning">
+              <strong>Not collected:</strong> reads {query.missing_tables.join(', ')}, which{' '}
+              {query.missing_tables.length === 1 ? 'is' : 'are'} not in the telemetry inventory, so it would find
+              nothing.
+            </p>
+          )}
           {query.status === 'ok' && query.query_text ? (
             <figure className="code-figure" aria-labelledby={`query-${query.id}`}>
               <figcaption id={`query-${query.id}`} className="visually-hidden">

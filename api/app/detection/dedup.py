@@ -31,6 +31,11 @@ def fingerprint(sigma_yaml: str) -> Fingerprint | None:
         document = yaml.safe_load(sigma_yaml)
     except yaml.YAMLError:
         return None
+    return fingerprint_document(document)
+
+
+def fingerprint_document(document: Any) -> Fingerprint | None:
+    """The fingerprint of an already-loaded Sigma document (a reference ruleset's files are loaded once)."""
     if not isinstance(document, dict) or not isinstance(document.get("detection"), dict):
         return None
     source = document.get("logsource") if isinstance(document.get("logsource"), dict) else {}

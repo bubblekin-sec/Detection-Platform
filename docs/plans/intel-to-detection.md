@@ -1,6 +1,6 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: all increments (1 to 10) done, plus the priority and workbench phase in [priority-and-workbench.md](priority-and-workbench.md). Azure provisioning is a separate task; its inputs are listed in "Increment 9 notes". Further work is in "Deferred".
+Status: all increments (1 to 10) done, plus the priority and workbench phase in [priority-and-workbench.md](priority-and-workbench.md). Azure provisioning is a separate task; its inputs are listed in "Increment 9 notes". Since then: approved rules sync into `rules/` (`cli sync-rules`), `cli crossref-rules` compares rules with reference Sigma rulesets, and `TELEMETRY_TABLES` flags queries on tables the organisation does not collect; see [enterprise-handoff.md](../enterprise-handoff.md). Further work is in "Deferred".
 
 **7 notes (review).**
 - **API:**

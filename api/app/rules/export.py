@@ -36,18 +36,27 @@ def export_rules(rules: Iterable[tuple[DetectionRule, str]]) -> Export:
     """`rules` pairs each rule with its article URL, which must still be in the rule's references."""
     result = Export()
     for rule, article_url in rules:
-        parsed = parse_sigma(rule.sigma_yaml)
-        document = single_mapping(rule.sigma_yaml)
-        if (
-            parsed.rule is None
-            or document is None
-            or identity_error(parsed.rule, rule.id, rule.sigma_yaml)
-            or article_url not in [str(reference) for reference in parsed.rule.references]
-        ):
+        document = exportable_document(rule, article_url)
+        if document is None:
             result.left_out.append(rule.id)
-            continue
-        result.documents.append(_as_document(rule.sigma_yaml, document))
+        else:
+            result.documents.append(document)
     return result
+
+
+def exportable_document(rule: DetectionRule, article_url: str) -> str | None:
+    """The rule as one Sigma document ready to publish (no trailing newline), or None when it no longer validates
+    or has lost its article reference. Shared by the YAML export and the rules folder sync."""
+    parsed = parse_sigma(rule.sigma_yaml)
+    document = single_mapping(rule.sigma_yaml)
+    if (
+        parsed.rule is None
+        or document is None
+        or identity_error(parsed.rule, rule.id, rule.sigma_yaml)
+        or article_url not in [str(reference) for reference in parsed.rule.references]
+    ):
+        return None
+    return _as_document(rule.sigma_yaml, document)
 
 
 def _as_document(sigma_yaml: str, document: dict[str, Any]) -> str:

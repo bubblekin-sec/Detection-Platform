@@ -1,12 +1,13 @@
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.db import get_session
+from app.detection.kql_schema import check_kql
 from app.models import Article, DetectionRule, PipelineRun, ProfileVersion
 from app.pipeline.priority import FoldedText
 from app.pipeline.run import queue_run
@@ -59,6 +60,8 @@ class QueryOut(BaseModel):
     error: str | None
     warnings: list[str]
     stale: bool = False
+    # Tables the query reads that aren't in the telemetry inventory (TELEMETRY_TABLES): it would find nothing there.
+    missing_tables: list[str] = []
 
 
 class DuplicateRef(BaseModel):
@@ -85,13 +88,29 @@ class RuleOut(BaseModel):
     duplicate_of: DuplicateRef | None = None
 
 
-def rule_out(rule: DetectionRule) -> RuleOut:
+def telemetry(request: Request) -> frozenset[str]:
+    return request.app.state.settings.telemetry_inventory
+
+
+TelemetryDep = Annotated[frozenset[str], Depends(telemetry)]
+
+
+def missing_tables(query_text: str | None, inventory: frozenset[str]) -> list[str]:
+    if not query_text or not inventory:
+        return []
+    return [table for table in check_kql(query_text).tables if table not in inventory]
+
+
+def rule_out(rule: DetectionRule, inventory: frozenset[str] = frozenset()) -> RuleOut:
     original = rule.duplicate
     return RuleOut(
         id=rule.id, title=rule.title, level=rule.level, status=rule.status, group=rule.group_key,
         observable_ids=rule.observable_ids, sigma_yaml=rule.sigma_yaml, sigma_hash=rule.sigma_hash, rationale=rule.rationale,
         queries=[
-            QueryOut.model_validate(query).model_copy(update={"stale": query.source_sigma_hash != rule.sigma_hash})
+            QueryOut.model_validate(query).model_copy(update={
+                "stale": query.source_sigma_hash != rule.sigma_hash,
+                "missing_tables": missing_tables(query.query_text, inventory),
+            })
             for query in rule.queries
         ],
         duplicate_of=DuplicateRef(
@@ -121,7 +140,7 @@ class RunOut(BaseModel):
     rules: list[RuleOut]
 
 
-def _out(run: PipelineRun, article: FoldedText | None = None) -> RunOut:
+def _out(run: PipelineRun, article: FoldedText | None = None, inventory: frozenset[str] = frozenset()) -> RunOut:
     return RunOut(
         id=run.id,
         article_id=run.article_id,
@@ -134,7 +153,7 @@ def _out(run: PipelineRun, article: FoldedText | None = None) -> RunOut:
         finished_at=run.finished_at,
         stages=[StageOut.model_validate(stage) for stage in run.stages],
         observables=[_observable(item, article) for item in run.observables],
-        rules=[rule_out(rule) for rule in run.rules],
+        rules=[rule_out(rule, inventory) for rule in run.rules],
     )
 
 
@@ -169,7 +188,7 @@ def _load(session: Session, run_id: int) -> PipelineRun | None:
 
 
 @router.post("/api/articles/{article_id}/runs", response_model=RunOut, status_code=202)
-def create_run(article_id: int, body: RunCreate, session: SessionDep, response: Response) -> RunOut:
+def create_run(article_id: int, body: RunCreate, session: SessionDep, response: Response, inventory: TelemetryDep) -> RunOut:
     """Queue the article for the profile's pipeline. Returns the existing run (200) if one is already active."""
     if session.get(Article, article_id) is None:
         raise HTTPException(status_code=404, detail={"errors": [f"Article {article_id} not found."]})
@@ -180,14 +199,14 @@ def create_run(article_id: int, body: RunCreate, session: SessionDep, response: 
     if not created:
         response.status_code = 200
     loaded = _load(session, run.id)
-    return _out(loaded, _article_text(session, article_id) if _has_evidence(loaded) else None)
+    return _out(loaded, _article_text(session, article_id) if _has_evidence(loaded) else None, inventory)
 
 
 CANCELLED = "Cancelled before it started."
 
 
 @router.post("/api/runs/{run_id}/cancel", response_model=RunOut)
-def cancel_run(run_id: int, session: SessionDep) -> RunOut:
+def cancel_run(run_id: int, session: SessionDep, inventory: TelemetryDep) -> RunOut:
     """Cancel a queued run, or a running one whose worker stopped (it ends `failed`, so the article can be queued
     again). A run a live worker is processing can't be cancelled: it is already spending, and the worker finishes it."""
     was_queued = session.scalar(select(PipelineRun.status).where(PipelineRun.id == run_id)) == "queued"
@@ -205,7 +224,7 @@ def cancel_run(run_id: int, session: SessionDep) -> RunOut:
         raise HTTPException(status_code=409, detail={"errors": [
             f"Run {run_id} is {run.status}; only a queued run, or one whose worker stopped, can be cancelled."
         ]})
-    return _out(run, None)
+    return _out(run, None, inventory)
 
 
 class WorkerStatusOut(BaseModel):
@@ -223,16 +242,16 @@ def get_worker_status(session: SessionDep) -> WorkerStatusOut:
 
 
 @router.get("/api/runs/{run_id}", response_model=RunOut)
-def get_run(run_id: int, session: SessionDep) -> RunOut:
+def get_run(run_id: int, session: SessionDep, inventory: TelemetryDep) -> RunOut:
     run = _load(session, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail={"errors": [f"Run {run_id} not found."]})
     # Polled every few seconds while a run is active: only index the article when there's evidence to place.
-    return _out(run, _article_text(session, run.article_id) if _has_evidence(run) else None)
+    return _out(run, _article_text(session, run.article_id) if _has_evidence(run) else None, inventory)
 
 
 @router.get("/api/articles/{article_id}/runs", response_model=list[RunOut])
-def list_article_runs(article_id: int, session: SessionDep) -> list[RunOut]:
+def list_article_runs(article_id: int, session: SessionDep, inventory: TelemetryDep) -> list[RunOut]:
     runs = session.scalars(
         select(PipelineRun)
         .where(PipelineRun.article_id == article_id)
@@ -243,4 +262,4 @@ def list_article_runs(article_id: int, session: SessionDep) -> list[RunOut]:
         .limit(20)
     ).all()
     text = _article_text(session, article_id) if any(_has_evidence(run) for run in runs) else None
-    return [_out(run, text) for run in runs]
+    return [_out(run, text, inventory) for run in runs]

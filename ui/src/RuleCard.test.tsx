@@ -54,6 +54,13 @@ describe('RuleCard', () => {
     expect(screen.queryByText(/Likely duplicate/)).not.toBeInTheDocument()
   })
 
+  it('warns when a query reads a table the organisation does not collect', () => {
+    const query = { ...rule.queries[0], missing_tables: ['DeviceEvents'] }
+    render(<RuleCard rule={{ ...rule, queries: [query] }} />)
+
+    expect(screen.getByText(/reads DeviceEvents, which is not in the telemetry inventory/)).toBeInTheDocument()
+  })
+
   it('shows the Sigma, the converted query and the review status', () => {
     render(<RuleCard rule={rule} />)
 

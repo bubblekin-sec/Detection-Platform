@@ -718,3 +718,40 @@ def test_rejecting_an_original_clears_the_flag_on_its_duplicates(api, article, f
     assert api.patch(f"/api/rules/{original}", json={"status": "rejected"}).status_code == 200
 
     assert api.get(f"/api/rules/{repeat}").json()["duplicate_of"] is None
+
+
+def test_a_query_reading_a_table_outside_the_telemetry_inventory_says_so(article, factory, test_settings, db_session):
+    narrow = test_settings.model_copy(update={"telemetry_tables": "DeviceProcessEvents,DeviceFileEvents"})
+    with TestClient(create_app(narrow)) as narrow_api:
+        body, _ = run_with(narrow_api, article, factory, extraction(("network_indicators", BEACON)), draft(DNS_RULE),
+                           kql=(KqlDraft(kql=DNS_KQL, rationale="x"),))
+        listed = narrow_api.get(f"/api/rules/{body['rules'][0]['id']}").json()
+
+    converted, written = body["rules"][0]["queries"]
+    assert written["missing_tables"] == ["DeviceEvents"] and converted["missing_tables"] == []
+    assert listed["queries"][1]["missing_tables"] == ["DeviceEvents"]
+
+
+def test_by_default_the_endpoint_tables_are_the_inventory(api, article, factory):
+    body, _ = run_with(api, article, factory, extraction(("network_indicators", BEACON)), draft(DNS_RULE),
+                       kql=(KqlDraft(kql=DNS_KQL, rationale="x"),))
+
+    assert [query["missing_tables"] for query in body["rules"][0]["queries"]] == [[], []]
+
+
+def test_an_unknown_table_in_the_inventory_fails_at_startup():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="not Defender XDR tables: DeviceDnsEvents"):
+        Settings(_env_file=None, telemetry_tables="DeviceProcessEvents, DeviceDnsEvents")
+
+
+def test_the_kql_prompt_offers_only_the_tables_in_the_inventory(api, article, factory):
+    narrow = Settings(_env_file=None, telemetry_tables="DeviceProcessEvents,DeviceNetworkEvents")
+
+    _, llm = run_with(api, article, factory, extraction(("network_indicators", BEACON)), draft(DNS_RULE),
+                      kql=(KqlDraft(kql='DeviceNetworkEvents | where RemoteUrl has "x"', rationale="x"),), settings=narrow)
+
+    (call,) = kql_calls(llm)
+    assert "DeviceNetworkEvents:" in call["system"] and "DeviceProcessEvents:" in call["system"]
+    assert "DeviceEvents" not in call["system"] and "DeviceRegistryEvents" not in call["system"]

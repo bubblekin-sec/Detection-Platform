@@ -28,6 +28,7 @@ from app.llm.client import LLMClient, LLMError, LLMRefusal, LLMUsage
 from app.models import DetectionRule, Observable, RuleQuery
 from app.profiles.compile import (
     compile_kql_generation,
+    prompt_tables,
     compile_rule_generation,
     escape_markup,
     render_kql_request,
@@ -88,7 +89,7 @@ def generate_rules(
     result = RuleGenerationResult(system_prompt=compile_rule_generation(definition))
     strategy = result.query_strategy = definition.query_strategy
     if strategy != "converted":
-        result.kql_system_prompt = compile_kql_generation(definition)
+        result.kql_system_prompt = compile_kql_generation(definition, prompt_tables(settings.telemetry_inventory))
     groups, _ = group_observables(observables)
     result.skipped_groups = max(0, len(groups) - settings.max_rule_groups_per_run)
     totals = [0, 0, 0]

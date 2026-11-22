@@ -1,0 +1,8 @@
+{
+  "about": "Files written by the Detection Platform (cli sync-rules). Edit rules in Review, not here.",
+  "files": {
+    "windows/process_creation/execution-from-recovery-oem-folder-via-cmd-start-or-certutil-574d37c7.kql": "718f9b691818d00f557da5fa8a309397b29d19017d3938c06151da057bc47b6f",
+    "windows/process_creation/execution-from-recovery-oem-folder-via-cmd-start-or-certutil-574d37c7.meta.json": "d09b1cd7474522e18180883885a92b47f4f1a17b8e2d65e93ef256c1fe8d4d86",
+    "windows/process_creation/execution-from-recovery-oem-folder-via-cmd-start-or-certutil-574d37c7.yml": "36175aa27f735bf889dc12e0227ddbb0d8aa25e99ef305a57e7e157f7067d718"
+  }
+}

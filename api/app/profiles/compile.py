@@ -135,7 +135,19 @@ KQL_PROMPT_TABLES = (
 )
 
 
-def compile_kql_generation(definition: ProfileDefinition) -> str:
+def prompt_tables(inventory: frozenset[str] | None = None) -> tuple[str, ...]:
+    """The tables offered to the model: the telemetry inventory, in the default order, then any others it adds."""
+    if not inventory:
+        return KQL_PROMPT_TABLES
+    return tuple(name for name in KQL_PROMPT_TABLES if name in inventory) + tuple(sorted(inventory - set(KQL_PROMPT_TABLES)))
+
+
+def compile_kql_generation(definition: ProfileDefinition, tables: tuple[str, ...] = KQL_PROMPT_TABLES) -> str:
+    device_events = (
+        '\n- DeviceEvents records many event types by ActionType, e.g. "DnsQueryResponse" for DNS lookups,\n'
+        '  "ServiceInstalled" for new services and "ScheduledTaskCreated" for scheduled tasks.'
+        if "DeviceEvents" in tables else ""
+    )
     return f"""You write Microsoft Defender XDR Advanced Hunting queries (KQL) for this reader: {definition.audience}.
 
 The user message holds one validated Sigma rule, generated from a threat intelligence article, with the observables
@@ -144,11 +156,9 @@ the same behaviour in Defender XDR.
 
 Requirements:
 - Use only these tables and columns (Advanced Hunting schema). A query naming anything else is rejected:
-{catalog_for_prompt(KQL_PROMPT_TABLES)}
+{catalog_for_prompt(tables)}
 - Details without their own column are in the dynamic AdditionalFields column; read them with
-  parse_json(AdditionalFields).Name or AdditionalFields.Name.
-- DeviceEvents records many event types by ActionType, e.g. "DnsQueryResponse" for DNS lookups,
-  "ServiceInstalled" for new services and "ScheduledTaskCreated" for scheduled tasks.
+  parse_json(AdditionalFields).Name or AdditionalFields.Name.{device_events}
 - Match the rule's specific values with has, contains, startswith, endswith or =~. Do not add a time filter:
   the hunting page sets the time range.
 - Return only the query text in the kql field, without markdown fences.

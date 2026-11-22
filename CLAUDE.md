@@ -8,7 +8,7 @@ Use synthetic examples and developer-controlled dependencies for local work. Int
 
 Use the package manifests, lockfiles, contributor guide, and CI configuration to find the supported commands and their working directories. Once verified, record them here or link to the existing authoritative guide. On an empty repo, record the first working build and test commands as part of the first feature.
 
-Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.md).
+Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.md). Moving to the enterprise: [docs/enterprise-handoff.md](docs/enterprise-handoff.md).
 
 ### API (`api/`, Python 3.13, uv)
 
@@ -25,6 +25,8 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 | Queue runs (batch) | `uv run python -m app.cli queue-runs [--source <slug>] [--min-priority <score>] [--limit 20]` (articles with no successful run yet; `--min-priority` takes the highest scores first) | verified |
 | Worker | `uv run python -m app.worker` (polls) or `--once` (drains the queue, then exits). Needs `ANTHROPIC_API_KEY` in `api/.env`; `LLM_PROVIDER=offline` runs without a model and fails each stage with an explanation. Nothing processes queued runs (Run detection, auto-queue, `queue-runs`) unless a worker is running; it beats every 10 s from a background thread (database clock), `GET /api/worker` reports it, and the article page says when no worker is running or when a running run's worker stopped. A run records the worker that claimed it: the next worker fails a run whose worker stopped, and `POST /api/runs/{id}/cancel` cancels a queued run or such an orphaned one | verified (real key, 2 runs; force-killed worker shown gone within 30 s) |
 | Duplicate rules | `uv run python -m app.cli dedup-rules` recomputes `duplicate_of` for every rule (new rules are flagged when saved). Same log source and detection values with Jaccard ≥ 0.80, or containment with ≥ 3 values and Jaccard ≥ 0.60 (`app/detection/dedup.py`). Flagged, never dropped; rejected rules are never the original | verified |
+| Sync rules folder | `uv run python -m app.cli sync-rules [--dir PATH]` writes approved rules into `RULES_DIR` (default `../rules`): Sigma `.yml`, deployable Defender `.kql`, provenance `.meta.json`, and `.platform-manifest.json`. Deterministic; removes only files it wrote; hand edits are conflicts (exit 1, and none of that rule's files are rewritten); a missing folder or an untrustworthy manifest exits 2 before writing; `--without-notes` leaves reviewer notes out. Never commits | verified |
+| Cross-reference rules | `uv run python -m app.cli crossref-rules [--dir PATH ...] [--status S] [--json]` reports each rule's closest Sigma rule in `REFERENCE_RULE_DIRS` (default `RULES_DIR`); writes nothing; exits 2 if a folder is missing | verified |
 | Tests | `uv run pytest` (needs the compose db; migrates and truncates `detection_test`, exits with code 2 if unreachable) | verified |
 | New migration | `uv run alembic revision --autogenerate -m "<change>" --rev-id <NNNN>`, then review the generated file | verified |
 | Run locally | `uv run uvicorn app.main:app --reload` (http://localhost:8000/api/health, docs at `/docs`) | verified |
@@ -45,7 +47,9 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 
 - `pysigma` is held at `>=1.5,<2` because `pysigma-backend-kusto` 1.x (the Defender XDR converter) requires pySigma 1.x. Move to pySigma 2.x only when the backend supports it, and re-run the tests. Older backends (0.4.x) declare `pysigma>=0.10` but break on 1.x and 2.x, so never leave the backend unpinned.
 - Sigma validation lives only in `app/detection/sigma.py`; Defender XDR KQL conversion only in `app/detection/kql.py`.
-- Export: `GET /api/rules/export` (`app/rules/export.py`) returns every approved rule as one multi-document Sigma YAML file, each re-validated and keeping its stored id and article reference. A rule that no longer validates is left out and named in a header comment. KQL artifacts are not exported yet.
+- The rules folder is written only by `app/rules/sync.py`; reference rulesets are read only by `app/rules/reference.py` (untrusted input: size, alias and symlink limits). Both are files, never the API's or worker's concern.
+- `TELEMETRY_TABLES` (validated against the Defender catalog in `app/detection/kql_schema.py`) drives `missing_tables` on every query in rule responses, `tables_not_in_inventory` in `.meta.json`, and the tables offered in the KQL prompt (`prompt_tables` in `app/profiles/compile.py`).
+- Export: `GET /api/rules/export` (`app/rules/export.py`) returns every approved rule as one multi-document Sigma YAML file, each re-validated and keeping its stored id and article reference. A rule that no longer validates is left out and named in a header comment. The YAML file holds Sigma only; `cli sync-rules` also writes each rule's deployable Defender KQL and provenance.
 - KQL artifacts follow the profile's `query_strategy` (`app/pipeline/rule_generation.py`): `converted` never calls a model; the default `converted_with_llm_fallback` asks `RULES_MODEL` for KQL only when conversion fails. Model-written KQL is checked against the Defender XDR catalog in `app/detection/kql_schema.py` (unknown tables or columns make the artifact `failed`).
 - Settings come from env or `api/.env` (see `api/.env.example`). Use `127.0.0.1`, not `localhost`, in local database URLs: on Windows, `localhost` tries IPv6 first and adds about 5 seconds to every connection.
 - The database engine is built only in `app/db.py` `make_engine()`. Tests use the same function.

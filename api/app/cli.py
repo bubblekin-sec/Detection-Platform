@@ -1,19 +1,24 @@
 """Operator commands. Usage: uv run python -m app.cli <command>"""
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 from sqlalchemy import select
 
 from app.config import Settings
 from app.db import make_engine, make_session_factory
-from app.models import Article, ArticleScore, PipelineRun, ProfileVersion, Source
+from app.models import Article, ArticleScore, DetectionRule, PipelineRun, ProfileVersion, Source
+from app.detection.dedup import fingerprint
 from app.pipeline.priority_report import priority_report
 from app.pipeline.run import queue_run
 from app.pipeline.scoring import score_articles
 from app.profiles.huntable_keywords import load_huntable_priority
 from app.profiles.seed import latest_version, seed_profiles
 from app.rules.duplicates import recompute_all
+from app.rules.reference import best_match, load_reference_rules
+from app.rules.sync import SyncRefused, sync_rules
 from app.sources.fetch import build_fetcher
 from app.sources.ingest import SourceFetchFailed, ingest_source
 from app.sources.seed import seed_sources
@@ -46,6 +51,17 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser(
         "dedup-rules", help="Recompute which rules duplicate an earlier one (same log source, near-identical values)."
     )
+    sync = commands.add_parser(
+        "sync-rules", help="Write approved rules (Sigma, Defender KQL, provenance) into the rules folder. Never commits."
+    )
+    sync.add_argument("--dir", type=Path, help="Rules folder (default RULES_DIR, ../rules from api/). Must exist.")
+    sync.add_argument("--without-notes", action="store_true", help="Leave reviewer notes out of .meta.json (e.g. for a public repo).")
+    crossref = commands.add_parser(
+        "crossref-rules", help="Report the closest reference-ruleset rule for each platform rule. Writes nothing."
+    )
+    crossref.add_argument("--dir", type=Path, action="append", help="Reference folder (repeatable; default REFERENCE_RULE_DIRS).")
+    crossref.add_argument("--status", choices=["pending_review", "approved", "rejected"], help="Only rules with this status.")
+    crossref.add_argument("--json", action="store_true", help="Machine-readable output.")
     args = parser.parse_args(argv)
 
     settings = Settings()
@@ -69,11 +85,61 @@ def main(argv: list[str] | None = None) -> int:
                 exit_code = _score_articles(session, args)
             elif args.command == "dedup-rules":
                 print(f"Rules flagged as duplicates: {recompute_all(session)}")
+            elif args.command == "sync-rules":
+                exit_code = _sync_rules(session, args.dir or settings.rules_dir, settings.telemetry_inventory,
+                                        include_notes=not args.without_notes)
+            elif args.command == "crossref-rules":
+                exit_code = _crossref_rules(session, args.dir or settings.reference_folders, args.status, args.json)
             elif args.command == "priority-report":
                 print(priority_report(session, load_huntable_priority(extra_dropped=set(args.drop))))
     finally:
         engine.dispose()
     return exit_code
+
+
+def _crossref_rules(session, folders: list[Path], status: str | None, as_json: bool) -> int:
+    """Exit 2 when a reference folder is missing: "no overlap" must never come from reading nothing."""
+    references = load_reference_rules(folders)
+    missing = [path for path, reason in references.skipped if reason == "not a folder"]
+    query = select(DetectionRule).order_by(DetectionRule.created_at, DetectionRule.run_id, DetectionRule.position)
+    if status:
+        query = query.where(DetectionRule.status == status)
+    rows = []
+    for rule in session.scalars(query):
+        match = best_match(fingerprint(rule.sigma_yaml), rule.id, references)
+        rows.append({"rule_id": rule.id, "title": rule.title, "status": rule.status,
+                     "match": vars(match) if match else None})
+    if as_json:
+        print(json.dumps({"reference_rules": len(references.rules), "skipped": references.skipped, "rules": rows}, indent=2))
+        return 2 if missing else 0
+    print(f"{len(references.rules)} reference rules from {', '.join(str(folder) for folder in folders)}; "
+          f"{sum(row['match'] is not None for row in rows)} of {len(rows)} platform rules have a close match.")
+    for row in rows:
+        if row["match"]:
+            match = row["match"]
+            print(f"  {row['title']} ({row['status']}) ~ {match['path']} \"{match['title']}\" ({match['similarity']:.0%})")
+    for path, reason in references.skipped:
+        print(f"  skipped {path}: {reason}", file=sys.stderr)
+    return 2 if missing else 0
+
+
+def _sync_rules(session, root: Path, inventory: frozenset[str], *, include_notes: bool) -> int:
+    try:
+        result = sync_rules(session, root, inventory, include_notes=include_notes)
+    except SyncRefused as error:
+        print(error, file=sys.stderr)
+        return 2
+    print(f"Rules folder {root.resolve()}: {len(result.written)} written, {result.unchanged} unchanged, "
+          f"{len(result.removed)} removed.")
+    for path in result.written:
+        print(f"  wrote {path}")
+    for path in result.removed:
+        print(f"  removed {path}")
+    for rule_id in result.left_out:
+        print(f"  left out {rule_id}: no longer validates or lost its article reference")
+    for conflict in result.conflicts:
+        print(f"  CONFLICT {conflict}", file=sys.stderr)
+    return 1 if result.conflicts else 0
 
 
 def _score_articles(session, args) -> int:

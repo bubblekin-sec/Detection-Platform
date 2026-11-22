@@ -111,6 +111,8 @@ export interface RuleQuery {
   error: string | null
   warnings: string[]
   stale: boolean
+  /** Tables the query reads that the organisation doesn't collect (TELEMETRY_TABLES). */
+  missing_tables?: string[]
 }
 
 export interface DetectionRule {

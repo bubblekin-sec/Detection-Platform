@@ -1,6 +1,7 @@
+from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Matches docker-compose.yml's laptop-only database. Deployed environments must set DATABASE_URL.
@@ -36,3 +37,39 @@ class Settings(BaseSettings):
     auto_queue_max_per_day: int = 25
     # A running run with no progress for this long is failed so it can be re-queued (must exceed one LLM call: timeout x (retries + 1)).
     run_stale_after_seconds: int = 1800
+
+    # Where `cli sync-rules` writes approved rules: the repo's rules/ when run from api/; at enterprise, a checkout of
+    # the rules repo (or a mounted share) in the job that runs the sync. The API and worker never write here.
+    rules_dir: Path = Path("../rules")
+    # Folders of Sigma rules that generated rules are cross-referenced against (`cli crossref-rules`), comma-separated.
+    # Empty means rules_dir (our own approved rules); at enterprise, a checkout of the organisation's ruleset.
+    reference_rule_dirs: str = ""
+
+    # Defender XDR tables the organisation actually collects, comma-separated. A query reading any other table gets a
+    # "not in the telemetry inventory" warning in Review. Empty means the seven Device* event tables the KQL prompt uses.
+    telemetry_tables: str = ""
+
+    @field_validator("telemetry_tables")
+    @classmethod
+    def known_tables(cls, value: str) -> str:
+        from app.detection.kql_schema import TABLES  # lazy: pulls in the Kusto backend
+
+        unknown = [name for name in _split(value) if name not in TABLES]
+        if unknown:
+            raise ValueError(f"not Defender XDR tables: {', '.join(unknown)}")
+        return value
+
+    @property
+    def telemetry_inventory(self) -> frozenset[str]:
+        from app.profiles.compile import KQL_PROMPT_TABLES
+
+        return frozenset(_split(self.telemetry_tables) or KQL_PROMPT_TABLES)
+
+    @property
+    def reference_folders(self) -> list[Path]:
+        folders = [Path(part.strip()) for part in self.reference_rule_dirs.split(",") if part.strip()]
+        return folders or [self.rules_dir]
+
+
+def _split(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]

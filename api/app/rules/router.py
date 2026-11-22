@@ -16,7 +16,7 @@ from app.models import RULE_STATUSES, Article, DetectionRule, RuleQuery
 from app.pipeline.rule_generation import converted_query, rule_level, sigma_digest
 from app.rules.duplicates import release_duplicates_of
 from app.rules.export import export_rules
-from app.runs.router import RuleOut, rule_out
+from app.runs.router import RuleOut, TelemetryDep, rule_out
 
 router = APIRouter(prefix="/api/rules", tags=["rules"])
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -65,9 +65,9 @@ class RuleUpdate(BaseModel):
         return self
 
 
-def _detail(rule: DetectionRule, article: Article) -> RuleDetail:
+def _detail(rule: DetectionRule, article: Article, inventory: frozenset[str]) -> RuleDetail:
     return RuleDetail(
-        **rule_out(rule).model_dump(),
+        **rule_out(rule, inventory).model_dump(),
         reviewer_note=rule.reviewer_note,
         reviewed_at=rule.reviewed_at,
         created_at=rule.created_at,
@@ -88,6 +88,7 @@ def _load(session: Session, rule_id: str, *, lock: bool = False) -> DetectionRul
 @router.get("", response_model=list[RuleDetail])
 def list_rules(
     session: SessionDep,
+    inventory: TelemetryDep,
     status: RuleStatus | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> list[RuleDetail]:
@@ -96,7 +97,7 @@ def list_rules(
     if status is not None:
         query = query.where(DetectionRule.status == status)
     query = query.order_by(DetectionRule.created_at.desc(), DetectionRule.run_id.desc(), DetectionRule.position).limit(limit)
-    return [_detail(rule, article) for rule, article in session.execute(query)]
+    return [_detail(rule, article, inventory) for rule, article in session.execute(query)]
 
 
 @router.get("/counts")
@@ -120,13 +121,13 @@ def export_approved_rules(session: SessionDep, status: Literal["approved"] = "ap
 
 
 @router.get("/{rule_id}", response_model=RuleDetail)
-def get_rule(rule_id: str, session: SessionDep) -> RuleDetail:
+def get_rule(rule_id: str, session: SessionDep, inventory: TelemetryDep) -> RuleDetail:
     rule = _load(session, rule_id)
-    return _detail(rule, session.get(Article, rule.article_id))
+    return _detail(rule, session.get(Article, rule.article_id), inventory)
 
 
 @router.patch("/{rule_id}", response_model=RuleDetail)
-def update_rule(rule_id: str, body: RuleUpdate, session: SessionDep) -> RuleDetail:
+def update_rule(rule_id: str, body: RuleUpdate, session: SessionDep, inventory: TelemetryDep) -> RuleDetail:
     rule = _load(session, rule_id, lock=True)
     changes = body.model_fields_set
     now = datetime.now(UTC)
@@ -174,7 +175,7 @@ def update_rule(rule_id: str, body: RuleUpdate, session: SessionDep) -> RuleDeta
 
     session.commit()
     rule = _load(session, rule_id)
-    return _detail(rule, session.get(Article, rule.article_id))
+    return _detail(rule, session.get(Article, rule.article_id), inventory)
 
 
 assert set(RuleStatus.__args__) == set(RULE_STATUSES)  # keep the API and the DB constraint in step
