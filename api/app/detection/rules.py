@@ -16,10 +16,24 @@ KEY_ORDER = [
 IDENTITY_ERROR = "The rule must be a single YAML document (extra documents or duplicate keys found)."
 
 
-def identity_error(parsed_rule, rule_id: str) -> str | None:
-    """A rule is accepted only if its Sigma id is the platform's id. pySigma merges `action: global` documents into
-    the next one, so a multi-document text can parse as one rule with a different (or no) id."""
-    return None if str(parsed_rule.id) == rule_id else IDENTITY_ERROR
+def identity_error(parsed_rule, rule_id: str, sigma_yaml: str) -> str | None:
+    """A rule is accepted only if its text is one plain document and its Sigma id is the platform's id. pySigma
+    merges `action: global` documents into the next one and drops a trailing `action: reset`, so a multi-document
+    text can parse as one rule; stored, it would skip id pinning and leak its template into an exported file."""
+    if single_mapping(sigma_yaml) is None or str(parsed_rule.id) != rule_id:
+        return IDENTITY_ERROR
+    return None
+
+
+def single_mapping(sigma_yaml: str) -> dict[str, Any] | None:
+    """The text's only non-empty document, when it is a mapping with no Sigma `action` key; otherwise None."""
+    try:
+        documents = [doc for doc in yaml.load_all(sigma_yaml, Loader=SigmaYAMLLoader) if doc is not None]
+    except yaml.YAMLError:
+        return None
+    if len(documents) != 1 or not isinstance(documents[0], dict) or "action" in documents[0]:
+        return None
+    return documents[0]
 
 
 def pin_platform_fields(sigma_yaml: str, *, rule_id: str, reference_url: str) -> str:

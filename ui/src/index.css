@@ -612,7 +612,8 @@ h2 {
   gap: 8px;
 }
 
-button {
+button,
+a.button {
   font: inherit;
   font-weight: 600;
   padding: 8px 14px;
@@ -623,12 +624,31 @@ button {
   cursor: pointer;
 }
 
+a.button {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.export-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 16px;
+}
+
+.export-bar p {
+  margin: 0;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: progress;
 }
 
-button.secondary {
+button.secondary,
+a.button.secondary {
   background: transparent;
   color: var(--accent);
 }

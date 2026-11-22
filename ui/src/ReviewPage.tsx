@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
 
-import { ApiError, describeError, listRules, updateRule, type DetectionRule, type RuleDetail, type RuleUpdate } from './api'
+import { ApiError, describeError, listRules, RULES_EXPORT_URL, updateRule, type DetectionRule, type RuleDetail, type RuleUpdate } from './api'
 import { RuleCard } from './RuleCard'
 import { followLink } from './routes'
 
@@ -98,6 +98,16 @@ export function ReviewPage({
       )}
       {rules === null && !error && <p className="muted">Loading rules…</p>}
       {rules?.length === 0 && <p className="muted">{filter.empty}</p>}
+      {status === 'approved' && rules !== null && rules.length > 0 && (
+        <div className="export-bar">
+          <p className="muted">
+            One Sigma YAML file with every approved rule, each keeping its id and article reference.
+          </p>
+          <a className="button secondary" href={RULES_EXPORT_URL} download>
+            Download approved rules (YAML)
+          </a>
+        </div>
+      )}
       {rules?.map((rule) => (
         <ReviewItem
           key={rule.id}

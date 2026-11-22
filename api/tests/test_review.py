@@ -114,6 +114,23 @@ def test_invalid_sigma_edits_are_rejected_and_nothing_changes(api, rule):
     assert api.get(f"/api/rules/{rule.id}").json() == before
 
 
+@pytest.mark.parametrize(
+    "wrap",
+    [
+        lambda sigma: "action: global\nfalsepositives:\n- injected\n---\n" + sigma,  # merged into the next document
+        lambda sigma: sigma + "---\naction: reset\n",  # dropped by pySigma, so this also parses as one rule
+    ],
+)
+def test_an_edit_with_sigma_action_documents_is_rejected(api, rule, wrap):
+    before = api.get(f"/api/rules/{rule.id}").json()
+
+    response = api.patch(f"/api/rules/{rule.id}", json={"sigma_yaml": wrap(SIGMA.format(id=rule.id)), "status": "approved"})
+
+    assert response.status_code == 422
+    assert "single YAML document" in " ".join(response.json()["detail"]["errors"])
+    assert api.get(f"/api/rules/{rule.id}").json() == before
+
+
 def test_the_rule_id_cannot_be_changed_by_an_edit(api, rule):
     edited = SIGMA.format(id="11111111-1111-4111-8111-111111111111")
 

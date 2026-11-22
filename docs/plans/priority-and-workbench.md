@@ -1,6 +1,6 @@
 # Plan: priority scoring, gated model use, workbench UI, then 6b
 
-Status: P1–P12 done. Next: increment 8 (YAML export), then 9 (containers).
+Status: P1–P12 done. Increment 8 (YAML export) done; next is increment 9 (containers).
 
 **P2/P3 notes.**
 - Detection profile v2 (`detection.yaml` `version: 2`) expands `priority: {source: huntable_keyword_registry, threshold: 37.5}` into concrete lists at seed time, so the stored version is self-contained. Seeding adds a higher seed version beside existing ones and never edits them.

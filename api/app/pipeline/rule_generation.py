@@ -190,7 +190,7 @@ def _validated(draft: SigmaDraft, *, rule_id, url, today):
     # The request escaped "<" so article text couldn't pose as markup; values copied from it come back escaped.
     sigma = finalize_sigma(unescape_markup(draft.sigma_yaml), rule_id=rule_id, reference_url=url, today=today)
     parsed = parse_sigma(sigma)
-    if parsed.rule is not None and (mismatch := identity_error(parsed.rule, rule_id)):
+    if parsed.rule is not None and (mismatch := identity_error(parsed.rule, rule_id, sigma)):
         return sigma, None, [*parsed.errors, mismatch]
     return sigma, parsed.rule, parsed.errors
 

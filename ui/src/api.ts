@@ -214,6 +214,8 @@ export const listArticleRuns = (articleId: number) => request<PipelineRun[]>('GE
 export const queueRun = (articleId: number, profile = 'detection') =>
   request<PipelineRun>('POST', `/api/articles/${articleId}/runs`, { profile })
 export const getRun = (id: number) => request<PipelineRun>('GET', `/api/runs/${id}`)
+/** Same-origin download of every approved rule as one multi-document Sigma YAML file. */
+export const RULES_EXPORT_URL = '/api/rules/export'
 export const listRules = (status: DetectionRule['status']) => request<RuleDetail[]>('GET', `/api/rules?status=${status}`)
 export const getRuleCounts = () => request<Record<DetectionRule['status'], number>>('GET', '/api/rules/counts')
 export const getDashboard = () => request<Dashboard>('GET', '/api/dashboard')

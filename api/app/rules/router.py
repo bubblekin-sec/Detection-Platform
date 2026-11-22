@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -14,6 +14,7 @@ from app.detection.rules import identity_error, pin_platform_fields
 from app.detection.sigma import parse_sigma
 from app.models import RULE_STATUSES, Article, DetectionRule, RuleQuery
 from app.pipeline.rule_generation import converted_query, rule_level, sigma_digest
+from app.rules.export import export_rules
 from app.runs.router import RuleOut, rule_out
 
 router = APIRouter(prefix="/api/rules", tags=["rules"])
@@ -104,6 +105,19 @@ def rule_counts(session: SessionDep) -> dict[str, int]:
     return {status: counts.get(status, 0) for status in RULE_STATUSES}
 
 
+@router.get("/export", response_class=Response, responses={200: {"content": {"application/yaml": {}}}})
+def export_approved_rules(session: SessionDep, status: Literal["approved"] = "approved") -> Response:
+    """Approved rules as one multi-document Sigma YAML file (declared before /{rule_id})."""
+    query = select(DetectionRule, Article.url).join(Article, Article.id == DetectionRule.article_id)
+    query = query.where(DetectionRule.status == status)
+    query = query.order_by(DetectionRule.created_at, DetectionRule.run_id, DetectionRule.position, DetectionRule.id)
+    return Response(
+        content=export_rules(session.execute(query)).text(),
+        media_type="application/yaml",
+        headers={"Content-Disposition": 'attachment; filename="approved-rules.yaml"'},
+    )
+
+
 @router.get("/{rule_id}", response_model=RuleDetail)
 def get_rule(rule_id: str, session: SessionDep) -> RuleDetail:
     rule = _load(session, rule_id)
@@ -127,7 +141,7 @@ def update_rule(rule_id: str, body: RuleUpdate, session: SessionDep) -> RuleDeta
         sigma = pin_platform_fields(body.sigma_yaml, rule_id=rule.id, reference_url=article.url)
         if sigma != rule.sigma_yaml:  # saving unchanged text is a no-op
             parsed = parse_sigma(sigma)
-            errors = parsed.errors if parsed.rule is None else [e for e in [identity_error(parsed.rule, rule.id)] if e]
+            errors = parsed.errors if parsed.rule is None else [e for e in [identity_error(parsed.rule, rule.id, sigma)] if e]
             if errors:
                 session.rollback()
                 raise HTTPException(status_code=422, detail={"errors": [f"sigma_yaml: {error}" for error in errors]})

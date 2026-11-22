@@ -49,6 +49,36 @@ describe('ReviewPage', () => {
     expect(screen.getByRole('link', { name: 'Operation Paper Lantern' })).toHaveAttribute('href', '/articles/10')
   })
 
+  it('offers the approved rules as a YAML download only where there are approved rules', async () => {
+    fakeApi({
+      'GET /api/rules?status=pending_review': () => ({ status: 200, body: [pending] }),
+      'GET /api/rules?status=approved': () => ({ status: 200, body: [{ ...pending, status: 'approved' }] }),
+    })
+    const user = userEvent.setup()
+    render(<ReviewPage onOpenArticle={() => {}} />)
+
+    await screen.findByRole('article', { name: pending.title })
+    expect(screen.queryByRole('link', { name: /download/i })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Approved' }))
+    const download = await screen.findByRole('link', { name: 'Download approved rules (YAML)' })
+    expect(download).toHaveAttribute('href', '/api/rules/export')
+    expect(download).toHaveAttribute('download')
+  })
+
+  it('has no download when nothing is approved', async () => {
+    fakeApi({
+      'GET /api/rules?status=pending_review': () => ({ status: 200, body: [] }),
+      'GET /api/rules?status=approved': () => ({ status: 200, body: [] }),
+    })
+    const user = userEvent.setup()
+    render(<ReviewPage onOpenArticle={() => {}} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Approved' }))
+    await screen.findByText('No approved rules yet.')
+    expect(screen.queryByRole('link', { name: /download/i })).not.toBeInTheDocument()
+  })
+
   it('approves a rule and takes it off the pending list', async () => {
     const api = fakeApi({
       'GET /api/rules?status=pending_review': () => ({ status: 200, body: [pending] }),

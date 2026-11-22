@@ -1,6 +1,6 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: increments 1 to 7 done. The next phase (priority scoring, gated model use, workbench UI, then 6b) is planned in [priority-and-workbench.md](priority-and-workbench.md). Increment 8 (YAML export) and 9 (containers) follow it.
+Status: increments 1 to 8 done, plus the priority and workbench phase in [priority-and-workbench.md](priority-and-workbench.md). Next: increment 9 (containers).
 
 **7 notes (review).**
 - **API:**
