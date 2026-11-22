@@ -6,8 +6,9 @@ it uses, and reports tables or columns Defender doesn't have. Defender column na
 keywords, operators and functions are lowercase, which is what makes a lexical check reliable enough to catch
 invented columns before review. A syntax check against real Defender happens only at enterprise handoff.
 
-The catalog is a snapshot (its file header gives the date). A column Defender added after it is reported as
-unknown, so a reviewer who knows the column exists can accept the query as written.
+The catalog is a snapshot (its file header gives the date), cleaned and topped up below for the seven endpoint
+event tables. A column Defender added after that is reported as unknown, so a reviewer who knows the column exists
+can accept the query as written.
 """
 
 import re
@@ -15,7 +16,31 @@ from dataclasses import dataclass, field
 
 from sigma.pipelines.microsoftxdr.tables import MICROSOFT_XDR_TABLES
 
-TABLES: dict[str, set[str]] = {name: set(columns) for name, columns in MICROSOFT_XDR_TABLES.items()}
+# Columns the snapshot lacks, from the Microsoft Learn schema pages (checked 2026-11-22). The generator that built the
+# snapshot read a docs repository that no longer exists, so upstream won't refresh it. Names only, no descriptions.
+_ADDED_SINCE_SNAPSHOT: dict[str, tuple[str, ...]] = {
+    "DeviceProcessEvents": ("ProcessUniqueId", "InitiatingProcessUniqueId", "LogonID"),
+    "DeviceNetworkEvents": ("InitiatingProcessUniqueId", "LogonID"),
+    "DeviceFileEvents": ("InitiatingProcessUniqueId", "LogonID"),
+    "DeviceRegistryEvents": ("InitiatingProcessUniqueId",),
+    "DeviceEvents": ("InitiatingProcessUniqueId",),
+    "DeviceImageLoadEvents": ("InitiatingProcessUniqueId",),
+    "DeviceLogonEvents": ("InitiatingProcessUniqueId",),
+}
+
+
+def _catalog() -> dict[str, list[str]]:
+    """The snapshot's column names in its order, cleaned of the generator's parse artifacts (a leading space on
+    DeviceEvents' InitiatingProcessVersionInfoInternalFileName, stray backticks and asterisks in EmailEvents)."""
+    catalog: dict[str, list[str]] = {}
+    for name, columns in MICROSOFT_XDR_TABLES.items():
+        cleaned = (column.strip().strip("`*").strip() for column in columns)
+        catalog[name] = list(dict.fromkeys([*filter(None, cleaned), *_ADDED_SINCE_SNAPSHOT.get(name, ())]))
+    return catalog
+
+
+CATALOG = _catalog()
+TABLES: dict[str, set[str]] = {name: set(columns) for name, columns in CATALOG.items()}
 
 # String literals and line comments carry no names. One pass, so "//" inside a string isn't a comment. Verbatim
 # strings (@"C:\Temp\") treat a backslash literally and double the quote to escape it; plain strings use \.
@@ -114,4 +139,4 @@ def check_kql(kql: str) -> SchemaCheck:
 
 def catalog_for_prompt(tables: tuple[str, ...]) -> str:
     """Column names of the given tables, one table per line, for the KQL-writing prompt."""
-    return "\n".join(f"{name}: {', '.join(MICROSOFT_XDR_TABLES[name])}" for name in tables)
+    return "\n".join(f"{name}: {', '.join(CATALOG[name])}" for name in tables)

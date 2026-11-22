@@ -100,3 +100,20 @@ union withsource=TableName DeviceProcessEvents, DeviceEvents
 
     assert check_kql(kql).errors == []
 
+
+
+def test_columns_documented_after_the_backend_snapshot_are_accepted():
+    kql = """DeviceProcessEvents
+| where LogonID > 0 and isnotempty(ProcessUniqueId)
+| join kind=inner (DeviceEvents | where isnotempty(InitiatingProcessVersionInfoInternalFileName)) on InitiatingProcessUniqueId"""
+
+    assert check_kql(kql).errors == []
+
+
+def test_the_prompt_catalog_has_no_parse_artifacts():
+    from app.detection.kql_schema import catalog_for_prompt
+    from app.profiles.compile import KQL_PROMPT_TABLES
+
+    for line in catalog_for_prompt(KQL_PROMPT_TABLES).splitlines():
+        columns = line.split(": ", 1)[1].split(", ")
+        assert all(column == column.strip() and column.isidentifier() for column in columns), line
