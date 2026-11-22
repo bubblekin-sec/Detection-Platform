@@ -86,7 +86,7 @@ Status: P1–P7 and P10 done, P8 (article queue UI) next.
 
 - **Where scores come from.** Article detail shows the *stored* score (the one gating, the list and the dashboard used) and computes only the highlight spans on demand. With no stored score for the latest version, `priority` is null. A score from an older `SCORER_TAG` is flagged `stale`; `score-articles --missing` refreshes those.
 - **One matching rule.** Keyword spans run the scorer's own case-folded patterns and map back to the original text (`FoldedText`), so a highlighted term is always one the score counted. Evidence quotes use the same map with whitespace collapsed, built once per request.
-- **Pipeline status** has one owner, `app/pipeline/status.py`, shared by the article list, article detail and the dashboard. An article's status is its *latest* run's, so a later run with no rules shows `no_rules` even if an earlier run's rules were approved (open product question).
+- **Pipeline status** has one owner, `app/pipeline/status.py`, shared by the article list, article detail and the dashboard. A queued or running run shows as in progress; otherwise an article with rules from *any* run of the profile shows `rules` (decided 2026-11-21: a later run that finds none, fails or is filtered doesn't hide them), and the rule count is the article's total; otherwise the latest run's outcome.
 - **Spend** on the dashboard is all time and all profiles; the rest of the page is per profile.
 - **Fresh install:** before `seed-profiles`, the dashboard still loads (volume, source health, spend) with `profile: null` and a hint to seed; naming an unknown profile is a 404.
 - **Links** go through `followLink` (`ui/src/routes.ts`): plain left clicks navigate in place, modified clicks are left to the browser.

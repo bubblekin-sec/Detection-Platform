@@ -183,3 +183,24 @@ def test_list_and_detail_work_before_any_profile_is_seeded(api, db_session):
 
     assert listed["priority"] is None and listed["pipeline"]["status"] == "not_run"
     assert detail["priority"] is None and detail["pipeline"] is None
+
+
+@pytest.mark.parametrize("later", ["succeeded", "failed", "filtered_out"])
+def test_rules_from_an_earlier_run_are_not_hidden_by_a_later_one(api, articles, db_session, later):
+    add_run(db_session, articles["high"], "succeeded", rules=2)
+    add_run(db_session, articles["high"], later)  # found no rules, failed, or was filtered out
+
+    high = next(item for item in api.get("/api/articles").json() if item["title"] == "High report")
+
+    assert high["pipeline"]["status"] == "rules" and high["pipeline"]["rules"] == 2
+    assert "High report" in titles(api.get("/api/articles?status=rules"))
+
+
+def test_a_run_in_progress_shows_even_when_earlier_rules_exist(api, articles, db_session):
+    add_run(db_session, articles["high"], "succeeded", rules=2)
+    add_run(db_session, articles["high"], "queued")
+
+    high = next(item for item in api.get("/api/articles").json() if item["title"] == "High report")
+
+    assert high["pipeline"]["status"] == "in_progress" and high["pipeline"]["rules"] == 2
+
