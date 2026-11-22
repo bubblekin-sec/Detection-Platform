@@ -1,6 +1,6 @@
 # Plan: priority scoring, gated model use, workbench UI, then 6b
 
-Status: P1–P7 and P10 done, P8 (article queue UI) next.
+Status: P1–P10 done, P11 (LLM-written KQL fallback) next.
 
 **P2/P3 notes.**
 - Detection profile v2 (`detection.yaml` `version: 2`) expands `priority: {source: huntable_keyword_registry, threshold: 37.5}` into concrete lists at seed time, so the stored version is self-contained. Seeding adds a higher seed version beside existing ones and never edits them.
@@ -92,3 +92,4 @@ Status: P1–P7 and P10 done, P8 (article queue UI) next.
 - **Links** go through `followLink` (`ui/src/routes.ts`): plain left clicks navigate in place, modified clicks are left to the browser.
 - **Sorting by source** is A to Z by default; `order` is honoured literally for every sort.
 - **Measured on 500 KB of text:** score 0.07 s, spans 0.16 s (capped at 2000, `spans_truncated`), evidence index 0.06 s, 300 quote lookups 0.01 s.
+- **Article detail (P9):** two columns, the text with keyword and evidence highlights (each toggleable, with a legend), and the priority breakdown with the run panel. Highlights are split by one sweep (`ui/src/highlight.ts`): about 5 ms for 2000 marks. Polling a run re-renders the text only when its evidence changes, and the API builds the evidence index only when a run has verified evidence.

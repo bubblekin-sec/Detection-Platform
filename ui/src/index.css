@@ -212,7 +212,67 @@ h2 {
 }
 
 .reader {
+  max-width: 1200px;
+}
+
+.reader-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  gap: 24px;
+  align-items: start;
+}
+
+.reader-main {
   max-width: 760px;
+}
+
+.reader-side {
+  display: grid;
+  gap: 16px;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.reader-side .run-panel {
+  margin: 0;
+}
+
+.reader-side,
+.reader-side > * {
+  min-width: 0; /* long Sigma lines and chips scroll or wrap inside the column instead of widening it */
+}
+
+.reader-side pre {
+  overflow-x: auto;
+}
+
+.highlight-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.highlight-toggles legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+@media (max-width: 1000px) {
+  .reader-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reader-side {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
 }
 
 .reader h1 {
@@ -1094,15 +1154,31 @@ tbody tr:last-child > * {
 mark.hl {
   background: none;
   color: inherit;
-  border-radius: 3px;
-  padding: 0 1px;
+  border-radius: 2px;
+}
+/* Evidence first, so a keyword inside a quote keeps its own colour (same specificity: the later rule wins).
+   A tint rather than an outline: keywords split a quote into several marks, and a tint stays continuous. */
+mark.hl-evidence {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 mark.hl-perfect { background: var(--tag-user-bg); color: var(--tag-user-text); }
 mark.hl-lolbas { background: var(--tag-seed-bg); color: var(--tag-seed-text); }
-mark.hl-intelligence,
-mark.hl-good { box-shadow: inset 0 -2px 0 var(--accent); }
+mark.hl-intelligence { box-shadow: inset 0 -2px 0 var(--accent); }
+mark.hl-good { box-shadow: inset 0 -1px 0 var(--muted); }
 mark.hl-negative { box-shadow: inset 0 -2px 0 var(--danger); }
-mark.hl-evidence { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.highlight-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 0;
+  flex-basis: 100%;
+  font-size: 0.8rem;
+}
 
 .breakdown .buckets {
   display: grid;

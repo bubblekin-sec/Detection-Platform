@@ -31,8 +31,20 @@ function tokens(stage: StageResult): string {
 }
 
 /** Detection run for one article: queue it, follow progress, show the relevance verdict. */
-export function RunPanel({ articleId, pollMs = 2000 }: { articleId: number; pollMs?: number }) {
+export function RunPanel({
+  articleId,
+  pollMs = 2000,
+  onRunChange,
+}: {
+  articleId: number
+  pollMs?: number
+  onRunChange?: (run: PipelineRun | null) => void // the run shown, e.g. so the reader can mark its evidence
+}) {
   const [run, setRun] = useState<PipelineRun | null | undefined>(undefined) // undefined = loading
+
+  useEffect(() => {
+    if (run !== undefined) onRunChange?.(run)
+  }, [run, onRunChange])
   const [error, setError] = useState<string | null>(null)
   const [queueing, setQueueing] = useState(false)
 

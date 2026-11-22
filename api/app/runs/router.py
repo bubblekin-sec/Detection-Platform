@@ -130,6 +130,10 @@ def _observable(item, article: FoldedText | None) -> ObservableOut:
     return out
 
 
+def _has_evidence(run: PipelineRun) -> bool:
+    return any(item.evidence_verified for item in run.observables)
+
+
 def _article_text(session: Session, article_id: int) -> FoldedText | None:
     """The article text indexed for evidence lookup: built once per request, however many observables there are."""
     text = session.scalar(select(Article.content_text).where(Article.id == article_id))
@@ -158,7 +162,8 @@ def create_run(article_id: int, body: RunCreate, session: SessionDep, response: 
     run, created = queue_run(session, article_id, version)
     if not created:
         response.status_code = 200
-    return _out(_load(session, run.id), _article_text(session, article_id))
+    loaded = _load(session, run.id)
+    return _out(loaded, _article_text(session, article_id) if _has_evidence(loaded) else None)
 
 
 @router.get("/api/runs/{run_id}", response_model=RunOut)
@@ -166,7 +171,8 @@ def get_run(run_id: int, session: SessionDep) -> RunOut:
     run = _load(session, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail={"errors": [f"Run {run_id} not found."]})
-    return _out(run, _article_text(session, run.article_id))
+    # Polled every few seconds while a run is active: only index the article when there's evidence to place.
+    return _out(run, _article_text(session, run.article_id) if _has_evidence(run) else None)
 
 
 @router.get("/api/articles/{article_id}/runs", response_model=list[RunOut])
@@ -180,5 +186,5 @@ def list_article_runs(article_id: int, session: SessionDep) -> list[RunOut]:
         .order_by(PipelineRun.id.desc())
         .limit(20)
     ).all()
-    text = _article_text(session, article_id)
+    text = _article_text(session, article_id) if any(_has_evidence(run) for run in runs) else None
     return [_out(run, text) for run in runs]

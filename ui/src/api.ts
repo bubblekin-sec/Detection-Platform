@@ -99,6 +99,7 @@ export interface Observable {
   evidence: string
   evidence_verified: boolean
   tags: Record<string, string>
+  evidence_span?: { start: number; end: number } | null // UTF-16 offsets into the article text; verified only
 }
 
 export interface RuleQuery {
