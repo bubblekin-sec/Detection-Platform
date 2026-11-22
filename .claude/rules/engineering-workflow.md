@@ -8,8 +8,9 @@ Match the work to the request. Answer design questions directly. Make a small, o
 | Implementing a feature or fixing a behavioral bug | `build-slice` |
 | Reviewing a diff or finishing a change to a public contract, persisted data, authorization, or a service boundary | `review-change` |
 | Introducing or changing a runtime setting, identity, network route, external dependency, or container behavior | `check-portability` |
+| Planning, building, or reviewing a change to what people see or do on a screen | `design-ui` (see `ui-design.md`; consult `ui-designer` for a new multi-screen flow or a consequential layout or navigation choice) |
 
-The main session owns edits and test execution. Give the planner and reviewer enough context to work independently. Honor plan-only and review-only requests.
+The main session owns edits and test execution. Give the planner, designer, and reviewer enough context to work independently. Honor plan-only and review-only requests.
 
 - Trace the entry point, its callers, and an existing example before creating anything. Reuse the existing owner of a rule or representation. Extract shared code when consumers need the same behavior and will change for the same reason.
 - Preserve observable contracts unless the user requests a change. Consider earlier data, error paths, and callers outside the immediate module when the diff affects them.
