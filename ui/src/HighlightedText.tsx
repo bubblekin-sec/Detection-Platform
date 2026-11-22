@@ -1,6 +1,6 @@
 import { Fragment, memo, useMemo } from 'react'
 
-import { segments, type Mark } from './highlight'
+import { evidenceAnchor, segments, type Mark } from './highlight'
 
 const BUCKET_STRENGTH = ['perfect', 'lolbas', 'intelligence', 'good', 'negative']
 
@@ -24,7 +24,15 @@ export const HighlightedText = memo(function HighlightedText({ text, marks }: { 
     <div className="article-text article-text-marked">
       {parts.map((part) =>
         part.marks.length ? (
-          <mark key={part.start} className={className(part.marks)} title={describeMarks(part.marks)}>
+          <mark
+            key={part.start}
+            className={className(part.marks)}
+            title={describeMarks(part.marks)}
+            // where an evidence quote begins: a target for "Show in text"
+            {...(part.marks.some((mark) => mark.kind === 'evidence' && mark.start === part.start)
+              ? { id: evidenceAnchor(part.start), tabIndex: -1 }
+              : {})}
+          >
             {part.text}
           </mark>
         ) : (

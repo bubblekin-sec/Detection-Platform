@@ -49,3 +49,8 @@ export function segments(text: string, marks: Mark[]): Segment[] {
   }
   return result
 }
+
+/** The id of the highlight where an evidence quote starting at `start` begins, for jumping to it. */
+export function evidenceAnchor(start: number): string {
+  return `evidence-at-${start}`
+}

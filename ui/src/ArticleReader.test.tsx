@@ -647,3 +647,74 @@ describe('ArticleReader default view', () => {
     expect(screen.getByRole('heading', { name: 'Earlier run (#7)' })).toBeInTheDocument()
   })
 })
+
+describe('ArticleReader jumps', () => {
+  const text = 'Intro.\nThe operators ran schtasks /create /tn Updater and wrote HKLM keys.'
+  const start = text.indexOf('ran schtasks')
+  const quote = 'ran schtasks /create /tn Updater'
+  const evidenceRun: PipelineRun = {
+    ...finished,
+    observables: [
+      { id: 1, field_name: 'scheduled_tasks', value: 'schtasks', evidence: quote, evidence_verified: true, tags: {},
+        evidence_span: { start, end: start + quote.length } },
+      { id: 2, field_name: 'registry', value: 'HKLM', evidence: 'wrote HKLM', evidence_verified: false, tags: {} },
+    ],
+  }
+
+  it('moves from an observable to its quote in the text, turning evidence highlights back on', async () => {
+    page({
+      [ARTICLE]: () => ({ status: 200, body: { ...detail, content_text: text } }),
+      'GET /api/articles/10/runs': () => ({ status: 200, body: [evidenceRun] }),
+    })
+    const user = userEvent.setup()
+    renderReader('extraction')
+    await user.click(await screen.findByLabelText('Evidence (1)')) // off
+
+    const verified = screen.getByText(quote, { selector: 'blockquote' }).closest('li')!
+    await user.click(within(verified).getByRole('button', { name: 'Show in text' }))
+
+    expect(screen.getByLabelText('Evidence (1)')).toBeChecked()
+    expect(document.activeElement).toHaveTextContent(quote)
+    expect(document.activeElement?.tagName).toBe('MARK')
+    const unverified = screen.getByText('wrote HKLM', { selector: 'blockquote' }).closest('li')!
+    expect(within(unverified).queryByRole('button', { name: 'Show in text' })).not.toBeInTheDocument()
+  })
+
+  it('opens Extraction on the observables a rule was built from, focusing the first one in list order', async () => {
+    const onViewChange = vi.fn()
+    const observable = (id: number, field: string, value: string) => ({
+      id, field_name: field, value, evidence: `quote ${value}`, evidence_verified: true, tags: {},
+    })
+    const listedRun: PipelineRun = {
+      ...finished,
+      observables: [observable(1, 'cmdline', 'A'), observable(2, 'registry', 'B'), observable(3, 'cmdline', 'C')],
+    }
+    page({ 'GET /api/articles/10/runs': () => ({ status: 200, body: [listedRun] }) }, [{ ...pendingRule, observable_ids: [2, 3] }])
+    const user = userEvent.setup()
+    renderReader('rules', { onViewChange })
+
+    await user.click(await screen.findByRole('button', { name: 'Built from 2 observables' }))
+
+    expect(onViewChange).toHaveBeenCalledWith('extraction')
+    const item = (value: string) => screen.getByText(`quote ${value}`, { selector: 'blockquote' }).closest('li')!
+    expect(item('C')).toHaveFocus() // the list shows cmdline (A, C) before registry (B)
+    expect(item('C')).toHaveClass('is-focused')
+    expect(item('B')).toHaveClass('is-focused')
+    expect(item('B')).toHaveTextContent('Used by the rule:')
+    expect(item('A')).not.toHaveClass('is-focused')
+  })
+
+  it('offers sources only for rules of the latest run, whose observables are the ones listed', async () => {
+    page({ 'GET /api/articles/10/runs': () => ({ status: 200, body: [{ ...finished, id: 8 }] }) }, [
+      { ...secondRule, run_id: 8 },
+      pendingRule,
+    ])
+
+    renderReader('rules')
+
+    const latest = await screen.findByRole('article', { name: secondRule.title })
+    expect(within(latest).getByRole('button', { name: 'Built from 1 observable' })).toBeInTheDocument()
+    const earlier = screen.getByRole('article', { name: pendingRule.title })
+    expect(within(earlier).queryByRole('button', { name: /Built from/ })).not.toBeInTheDocument()
+  })
+})

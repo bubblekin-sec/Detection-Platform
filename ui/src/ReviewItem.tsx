@@ -14,11 +14,13 @@ export function ReviewItem({
   onUpdated,
   onOpenArticle,
   showArticle = true,
+  onShowObservables,
 }: {
   rule: RuleDetail
   onUpdated: (rule: RuleDetail) => void
   onOpenArticle: (id: number) => void
   showArticle?: boolean // false on the article's own page
+  onShowObservables?: () => void // on the article page: show the observables this rule was built from
 }) {
   const [note, setNote] = useState(rule.reviewer_note ?? '')
   const [editor, setEditor] = useState<Editor>('none')
@@ -73,8 +75,15 @@ export function ReviewItem({
     followLink(event, () => onOpenArticle(rule.article.id))
   }
 
-  const header = (showArticle || rule.reviewer_note) && (
+  const sources = onShowObservables && rule.observable_ids.length > 0 && (
+    <button type="button" className="link-button small" onClick={onShowObservables}>
+      Built from {rule.observable_ids.length} observable{rule.observable_ids.length === 1 ? '' : 's'}
+    </button>
+  )
+  const header = (showArticle || rule.reviewer_note || sources) && (
     <p className="muted small">
+      {sources}
+      {sources && (showArticle || rule.reviewer_note) && ' · '}
       {showArticle && (
         <>
           From{' '}

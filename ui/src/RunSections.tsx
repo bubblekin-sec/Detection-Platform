@@ -1,5 +1,5 @@
 import type { Observable, PipelineRun, StageResult } from './api'
-import { isActive, tokens, type ArticleRun } from './articleRun'
+import { groupByField, isActive, tokens, type ArticleRun } from './articleRun'
 
 /** Interruptions that need the reviewer's attention: a missing or stopped worker, a failure, a load error. */
 export function RunBanners({ state }: { state: ArticleRun }) {
@@ -163,16 +163,23 @@ function fieldLabel(name: string): string {
 }
 
 /** Extracted observables grouped by field, each with its evidence quote; unverified ones are flagged. */
-export function Observables({ run, notReached }: { run: PipelineRun | null | undefined; notReached: string }) {
+export function Observables({
+  run,
+  notReached,
+  focused,
+  onShowInText,
+}: {
+  run: PipelineRun | null | undefined
+  notReached: string
+  focused?: ReadonlySet<number> // observables a rule was built from, marked in the list
+  onShowInText?: (item: Observable) => void
+}) {
   const extraction = run?.stages.find((stage) => stage.stage === 'extraction' && stage.status === 'passed')
   if (!run || !extraction) return <p className="muted">{notReached}</p>
   if (run.observables.length === 0) {
     return <p className="muted">No observables were extracted: the article had no concrete detail for the profile’s fields.</p>
   }
-  const groups = new Map<string, Observable[]>()
-  for (const item of run.observables) {
-    groups.set(item.field_name, [...(groups.get(item.field_name) ?? []), item])
-  }
+  const groups = groupByField(run.observables)
   const unverified = run.observables.filter((item) => !item.evidence_verified).length
 
   return (
@@ -187,9 +194,20 @@ export function Observables({ run, notReached }: { run: PipelineRun | null | und
           </h3>
           <ul>
             {items.map((item) => (
-              <li key={item.id} className={item.evidence_verified ? undefined : 'unverified'}>
+              <li
+                key={item.id}
+                id={`observable-${item.id}`}
+                tabIndex={-1}
+                className={[item.evidence_verified ? '' : 'unverified', focused?.has(item.id) ? 'is-focused' : ''].join(' ').trim() || undefined}
+              >
+                {focused?.has(item.id) && <span className="visually-hidden">Used by the rule: </span>}
                 <code className="observable-value">{item.value}</code>
                 <blockquote>{item.evidence}</blockquote>
+                {item.evidence_span && onShowInText && (
+                  <button type="button" className="link-button small" onClick={() => onShowInText(item)}>
+                    Show in text
+                  </button>
+                )}
                 {!item.evidence_verified && (
                   <p className="warning">
                     <strong>Unverified:</strong> the quote was not found in the article, or does not contain this

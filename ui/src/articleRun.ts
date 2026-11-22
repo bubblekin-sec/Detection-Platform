@@ -7,6 +7,7 @@ import {
   getWorkerStatus,
   listArticleRuns,
   queueRun,
+  type Observable,
   type PipelineRun,
   type StageResult,
   type WorkerStatus,
@@ -125,4 +126,13 @@ export function stageOf(run: PipelineRun | null | undefined, name: string): Stag
 export function tokens(stage: StageResult): string {
   const total = (stage.input_tokens ?? 0) + (stage.output_tokens ?? 0)
   return `${stage.model ?? 'model'} · ${total.toLocaleString('en-US')} tokens`
+}
+
+/** Observables by field, fields in order of first appearance: the order the Extraction list shows them in. */
+export function groupByField(observables: Observable[]): Map<string, Observable[]> {
+  const groups = new Map<string, Observable[]>()
+  for (const item of observables) {
+    groups.set(item.field_name, [...(groups.get(item.field_name) ?? []), item])
+  }
+  return groups
 }

@@ -6,14 +6,15 @@ import {
   listReviewArticles,
   listRules,
   type ArticleDetail,
+  type Observable,
   type PipelineRun,
   type RuleDetail,
 } from './api'
-import { isActive, stageOf, useArticleRun } from './articleRun'
+import { groupByField, isActive, stageOf, useArticleRun } from './articleRun'
 import { READER_VIEWS, VIEW_LABELS, type ReaderView } from './readerView'
 import { GroupProblems, Observables, RelevanceVerdict, RunBanners } from './RunSections'
 import { Meta } from './ArticlesPage'
-import { type Mark } from './highlight'
+import { evidenceAnchor, type Mark } from './highlight'
 import { HighlightedText } from './HighlightedText'
 import { PriorityBreakdown } from './PriorityBreakdown'
 import { ReviewItem } from './ReviewItem'
@@ -211,6 +212,7 @@ export function ArticleReader({
         return
       }
       focusView.current = true
+      pendingTarget.current = null
       setChosen(next)
       onViewChange(next)
     })
@@ -244,6 +246,38 @@ export function ArticleReader({
   function toggle(kind: 'keywords' | 'evidence', on: boolean) {
     setHighlights((current) => ({ ...current, [textView]: { ...current[textView], [kind]: on } }))
   }
+
+  // "Show in text" and "Built from N observables" move to an element that may only exist after the next render.
+  const pendingTarget = useRef<string | null>(null)
+  function goTo(id: string) {
+    const target = document.getElementById(id)
+    if (target) reveal(target)
+    else pendingTarget.current = id
+  }
+  function showInText(item: Observable) {
+    if (!item.evidence_span) return
+    if (!highlights.extraction.evidence) setHighlights((current) => ({ ...current, extraction: { ...current.extraction, evidence: true } }))
+    goTo(evidenceAnchor(item.evidence_span.start))
+  }
+
+  // The observables a rule was built from, marked in the Extraction list until another rule's are shown.
+  const [focusedObservables, setFocusedObservables] = useState<ReadonlySet<number>>(new Set())
+  function showObservables(ids: number[]) {
+    const listed = [...groupByField(run?.observables ?? []).values()].flat()
+    const first = listed.find((item) => ids.includes(item.id))
+    setFocusedObservables(new Set(ids))
+    setChosen('extraction')
+    onViewChange('extraction')
+    if (first) pendingTarget.current = `observable-${first.id}`
+    else focusView.current = true // nothing to point at: land on the view, not on <body>
+  }
+  // After a render, move to the element a jump asked for once it exists.
+  useEffect(() => {
+    const target = pendingTarget.current && document.getElementById(pendingTarget.current)
+    if (!target) return
+    pendingTarget.current = null
+    reveal(target)
+  })
 
   const outcomes = article ? stageOutcomes(article, run, rules) : null
 
@@ -354,7 +388,12 @@ export function ArticleReader({
                 ) : (
                   <section className="panel" aria-labelledby="observables-heading">
                     <h2 id="observables-heading">Observables</h2>
-                    <Observables run={run} notReached={notExtracted(run)} />
+                    <Observables
+                      run={run}
+                      notReached={notExtracted(run)}
+                      focused={focusedObservables}
+                      onShowInText={showInText}
+                    />
                   </section>
                 )}
               </aside>
@@ -363,6 +402,7 @@ export function ArticleReader({
 
           {shown === 'rules' && (
             <RulesView
+              onShowObservables={showObservables}
               articleId={id}
               onOpenNext={onOpenNext}
               run={run}
@@ -391,6 +431,7 @@ function notExtracted(run: PipelineRun | null | undefined): string {
 }
 
 function RulesView({
+  onShowObservables,
   articleId,
   onOpenNext,
   run,
@@ -399,6 +440,7 @@ function RulesView({
   onUpdated,
   onOpenArticle,
 }: {
+  onShowObservables: (ids: number[]) => void
   articleId: number
   onOpenNext?: (id: number) => void
   run: PipelineRun | null | undefined
@@ -431,7 +473,8 @@ function RulesView({
   const earlierRuns = [...new Set((rules ?? []).filter((rule) => rule.run_id !== run?.id).map((rule) => rule.run_id))]
   const approved = rules?.filter((rule) => rule.status === 'approved').length ?? 0
 
-  function cards(list: RuleDetail[]) {
+  // Only the latest run's observables are listed, so only its rules can point at their sources.
+  function cards(list: RuleDetail[], latestRun = false) {
     return list.map((rule) => (
       <ReviewItem
         key={rule.id}
@@ -439,6 +482,7 @@ function RulesView({
         showArticle={false}
         onOpenArticle={onOpenArticle}
         onUpdated={(next) => updated(next, rule.status)}
+        onShowObservables={latestRun ? () => onShowObservables(rule.observable_ids) : undefined}
       />
     ))
   }
@@ -471,7 +515,7 @@ function RulesView({
           <h3>Latest run (#{run.id})</h3>
           {running && <p className="muted">Rules appear here when the run finishes.</p>}
           {note && <p className="muted">{note}</p>}
-          {cards(latest)}
+          {cards(latest, true)}
           {generation && <GroupProblems output={generation.output} />}
         </div>
       )}
@@ -518,4 +562,11 @@ function NextInQueue({ currentId, onOpen }: { currentId: number; onOpen: (id: nu
       )}
     </div>
   )
+}
+
+/** Scroll an element into view (instantly when the reader prefers reduced motion) and move focus to it. */
+function reveal(element: HTMLElement) {
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  element.scrollIntoView?.({ block: 'center', behavior: reduced ? 'auto' : 'smooth' })
+  element.focus({ preventScroll: true })
 }

@@ -71,4 +71,5 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 | Dev server | `npm run dev` (http://localhost:5173; proxies `/api` to `http://127.0.0.1:8000`, override with `API_PROXY_TARGET`) | verified |
 
 - The UI calls only the same-origin `/api` path. Never put an API hostname into the bundle. In the container, nginx proxies `/api` to `API_UPSTREAM` with the path unchanged.
+- The article page (`src/ArticleReader.tsx`) shows one article's pipeline as Filtering / Extraction / Rules (`?view=`), and rules are reviewed there; Review opens on a by-article queue (`GET /api/rules/by-article`), with `?view=rules` for the flat list. `GET /api/rules?article_id=` lists one article's rules across runs.
 - All API calls go through `src/api.ts`. 4xx responses arrive as `{"detail": {"errors": ["field: message"]}}`; `ApiError.byField()` maps them onto form fields.
