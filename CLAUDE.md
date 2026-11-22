@@ -31,6 +31,7 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 
 - `pysigma` is held at `>=1.5,<2` because `pysigma-backend-kusto` 1.x (the Defender XDR converter) requires pySigma 1.x. Move to pySigma 2.x only when the backend supports it, and re-run the tests. Older backends (0.4.x) declare `pysigma>=0.10` but break on 1.x and 2.x, so never leave the backend unpinned.
 - Sigma validation lives only in `app/detection/sigma.py`; Defender XDR KQL conversion only in `app/detection/kql.py`.
+- KQL artifacts follow the profile's `query_strategy` (`app/pipeline/rule_generation.py`): `converted` never calls a model; the default `converted_with_llm_fallback` asks `RULES_MODEL` for KQL only when conversion fails. Model-written KQL is checked against the Defender XDR catalog in `app/detection/kql_schema.py` (unknown tables or columns make the artifact `failed`).
 - Settings come from env or `api/.env` (see `api/.env.example`). Use `127.0.0.1`, not `localhost`, in local database URLs: on Windows, `localhost` tries IPv6 first and adds about 5 seconds to every connection.
 - The database engine is built only in `app/db.py` `make_engine()`. Tests use the same function.
 - Seed sources come from the vendored Huntable list. Its provenance and pinned commit are in `THIRD_PARTY_NOTICES.md`. Never edit the vendored YAML; put corrections in `SEED_FIXES` in `app/sources/seed.py`.

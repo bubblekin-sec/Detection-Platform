@@ -29,7 +29,7 @@ class OfflineLLMClient:
         max_tokens: int = 16000,
         fallbacks: bool = False,
     ) -> LLMResult[T]:
-        raise LLMError("LLM_PROVIDER is 'offline', so no model was called. Add ANTHROPIC_API_KEY to api/.env.")
+        raise LLMError("LLM_PROVIDER is 'offline', so no model was called. Add ANTHROPIC_API_KEY to api/.env.", systemic=True)
 
 
 def build_llm_client(settings: Settings) -> LLMClient:

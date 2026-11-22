@@ -12,9 +12,12 @@ Effort = Literal["low", "medium", "high", "xhigh", "max"]
 class LLMError(Exception):
     """A call failed. The message is safe to store and show (never contains credentials)."""
 
-    def __init__(self, message: str, *, retryable: bool = False) -> None:
+    def __init__(self, message: str, *, retryable: bool = False, systemic: bool = False) -> None:
         super().__init__(message)
         self.retryable = retryable
+        # True when every further call would fail the same way (credentials, model access, rate limit, outage),
+        # as opposed to a problem with this one response (token limit, malformed output).
+        self.systemic = systemic
 
 
 class LLMRefusal(LLMError):

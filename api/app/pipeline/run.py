@@ -240,7 +240,10 @@ def _execute(session_factory: sessionmaker[Session], llm: LLMClient, settings: S
         StageResult(
             stage="rule_generation", status="passed" if created else "failed",
             output={"groups": generated.groups, "rules": created, "skipped_groups": generated.skipped_groups},
-            compiled_prompt=generated.system_prompt, model=settings.rules_model,
+            compiled_prompt=generated.system_prompt
+            + (f"\n\n--- KQL writing (query_strategy: {generated.query_strategy}) ---\n\n{generated.kql_system_prompt}"
+               if generated.kql_system_prompt else ""),
+            model=settings.rules_model,
             input_tokens=generated.usage.input_tokens, output_tokens=generated.usage.output_tokens,
             cache_read_tokens=generated.usage.cache_read_tokens, started_at=started, finished_at=clock(),
         ),

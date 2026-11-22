@@ -164,3 +164,10 @@ class RelevanceVerdict(BaseModel):
     score: int = Field(description="0 (irrelevant) to 10 (exactly what the reader needs).")
     rationale: str = Field(description="Two to four sentences explaining the score against the criteria.")
     signals: list[str] = Field(description="Short phrases quoted or paraphrased from the article that drove the score.")
+
+
+class KqlDraft(BaseModel):
+    """Structured output of the KQL-writing call (a Defender XDR query for one validated Sigma rule)."""
+
+    kql: str = Field(description="One Microsoft Defender XDR Advanced Hunting query. No markdown fences.")
+    rationale: str = Field(description="One sentence: which table and columns carry the rule's behaviour.")

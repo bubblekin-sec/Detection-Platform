@@ -55,18 +55,18 @@ class AnthropicLLMClient:
             else:
                 response = self._client.messages.create(**request)
         except anthropic.AuthenticationError as error:
-            raise LLMError("Anthropic rejected the API key (401). Check ANTHROPIC_API_KEY in api/.env.") from error
+            raise LLMError("Anthropic rejected the API key (401). Check ANTHROPIC_API_KEY in api/.env.", systemic=True) from error
         except anthropic.PermissionDeniedError as error:
-            raise LLMError(f"The API key is not allowed to use {model} (403): {_detail(error)}") from error
+            raise LLMError(f"The API key is not allowed to use {model} (403): {_detail(error)}", systemic=True) from error
         except anthropic.NotFoundError as error:
-            raise LLMError(f"Model {model} was not found (404). Check the model setting.") from error
+            raise LLMError(f"Model {model} was not found (404). Check the model setting.", systemic=True) from error
         except anthropic.RateLimitError as error:
-            raise LLMError("Rate limited by the Anthropic API (429) after retries.", retryable=True) from error
+            raise LLMError("Rate limited by the Anthropic API (429) after retries.", retryable=True, systemic=True) from error
         except (anthropic.APITimeoutError, anthropic.APIConnectionError) as error:
-            raise LLMError(f"Could not reach the Anthropic API: {type(error).__name__}.", retryable=True) from error
+            raise LLMError(f"Could not reach the Anthropic API: {type(error).__name__}.", retryable=True, systemic=True) from error
         except anthropic.APIStatusError as error:
             retryable = error.status_code >= 500
-            raise LLMError(f"Anthropic API error {error.status_code}: {_detail(error)}", retryable=retryable) from error
+            raise LLMError(f"Anthropic API error {error.status_code}: {_detail(error)}", retryable=retryable, systemic=True) from error
         except anthropic.APIError as error:  # e.g. APIResponseValidationError
             raise LLMError(f"Unexpected response from the Anthropic API ({type(error).__name__}).") from error
 
