@@ -131,6 +131,7 @@ export interface DetectionRule {
 }
 
 export interface RuleDetail extends DetectionRule {
+  run_id: number
   reviewer_note: string | null
   reviewed_at: string | null
   created_at: string
@@ -231,7 +232,13 @@ export interface WorkerStatus {
 export const getWorkerStatus = () => request<WorkerStatus>('GET', '/api/worker')
 /** Same-origin download of every approved rule as one multi-document Sigma YAML file. */
 export const RULES_EXPORT_URL = '/api/rules/export'
-export const listRules = (status: DetectionRule['status']) => request<RuleDetail[]>('GET', `/api/rules?status=${status}`)
+/** Rules newest first, in one status and/or from one article (every run of it). */
+export function listRules(filter: { status?: DetectionRule['status']; articleId?: number }) {
+  const params = new URLSearchParams()
+  if (filter.status) params.set('status', filter.status)
+  if (filter.articleId !== undefined) params.set('article_id', String(filter.articleId))
+  return request<RuleDetail[]>('GET', `/api/rules?${params}`)
+}
 export const getRuleCounts = () => request<Record<DetectionRule['status'], number>>('GET', '/api/rules/counts')
 export const getDashboard = () => request<Dashboard>('GET', '/api/dashboard')
 

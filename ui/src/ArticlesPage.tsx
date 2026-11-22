@@ -1,25 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
 
 import {
   describeError,
-  getArticle,
   listArticles,
   listSources,
-  type ArticleDetail,
   type ArticleSummary,
   type Band,
-  type PipelineRun,
   type PipelineState,
   type Source,
 } from './api'
 import { BANDS, PAGE_SIZE, SORTS, STATUSES, parseArticleQuery, toApiQuery, toSearch, type ArticleQuery } from './articleQuery'
 import { KeywordChips, PipelineBadge, ScoreBadge } from './badges'
-import { type Mark } from './highlight'
-import { HighlightedText } from './HighlightedText'
 import { PIPELINE_LABELS } from './labels'
-import { PriorityBreakdown } from './PriorityBreakdown'
 import { followLink } from './routes'
-import { RunPanel } from './RunPanel'
 
 const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
@@ -27,7 +20,7 @@ function formatDate(value: string | null): string | null {
   return value ? DATE_FORMAT.format(new Date(value)) : null
 }
 
-function Meta({ article }: { article: Pick<ArticleSummary, 'source' | 'published_at' | 'author' | 'word_count'> }) {
+export function Meta({ article }: { article: Pick<ArticleSummary, 'source' | 'published_at' | 'author' | 'word_count'> }) {
   const published = formatDate(article.published_at)
   return (
     <p className="article-meta">
@@ -267,114 +260,5 @@ export function ArticlesPage({
         </nav>
       )}
     </section>
-  )
-}
-
-function evidenceOf(run: PipelineRun | null): Mark[] {
-  return (run?.observables ?? []).flatMap((item) =>
-    item.evidence_span
-      ? [{ start: item.evidence_span.start, end: item.evidence_span.end, kind: 'evidence' as const, label: item.field_name }]
-      : [],
-  )
-}
-
-function sameMarks(a: Mark[], b: Mark[]): boolean {
-  return a.length === b.length && a.every((mark, index) => {
-    const other = b[index]
-    return mark.start === other.start && mark.end === other.end && mark.label === other.label
-  })
-}
-
-export function ArticleReader({ id, onBack, pollMs }: { id: number; onBack: () => void; pollMs?: number }) {
-  const [article, setArticle] = useState<ArticleDetail | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  // Only the evidence matters here: keep the same array while polling returns the same evidence, so the
-  // (memoised) highlighted text doesn't re-split a long article every two seconds.
-  const [evidenceMarks, setEvidenceMarks] = useState<Mark[]>([])
-  const onRunChange = useCallback((run: PipelineRun | null) => {
-    const next = evidenceOf(run)
-    setEvidenceMarks((current) => (sameMarks(current, next) ? current : next))
-  }, [])
-  const [showKeywords, setShowKeywords] = useState(true)
-  const [showEvidence, setShowEvidence] = useState(true)
-
-  useEffect(() => {
-    getArticle(id)
-      .then(setArticle)
-      .catch((failure) => setError(describeError(failure)))
-  }, [id])
-
-  const keywordMarks = useMemo<Mark[]>(
-    () =>
-      (article?.priority?.spans ?? []).map((span) => ({
-        start: span.start,
-        end: span.end,
-        kind: 'keyword',
-        label: span.term,
-        bucket: span.bucket,
-      })),
-    [article],
-  )
-  const marks = useMemo(
-    () => [...(showKeywords ? keywordMarks : []), ...(showEvidence ? evidenceMarks : [])],
-    [showKeywords, showEvidence, keywordMarks, evidenceMarks],
-  )
-
-  return (
-    <article className="page reader">
-      <button type="button" className="link-button back" onClick={onBack}>
-        ← All articles
-      </button>
-      {error && (
-        <p className="banner banner-error" role="alert">
-          {error}
-        </p>
-      )}
-      {!article && !error && <p className="muted">Loading article…</p>}
-      {article && (
-        <div className="reader-layout">
-          <div className="reader-main">
-            <h1>{article.title}</h1>
-            <Meta article={article} />
-            <p>
-              <a href={article.url} target="_blank" rel="noreferrer">
-                Open original ↗
-              </a>
-            </p>
-            <fieldset className="highlight-toggles">
-              <legend>Highlight</legend>
-              <label>
-                <input type="checkbox" checked={showKeywords} onChange={(event) => setShowKeywords(event.target.checked)} />{' '}
-                Keywords ({keywordMarks.length.toLocaleString('en-US')})
-              </label>
-              <label>
-                <input type="checkbox" checked={showEvidence} onChange={(event) => setShowEvidence(event.target.checked)} />{' '}
-                Evidence ({evidenceMarks.length})
-              </label>
-              <ul className="highlight-legend" aria-label="Highlight styles">
-                <li><mark className="hl hl-perfect">perfect</mark></li>
-                <li><mark className="hl hl-lolbas">lolbas</mark></li>
-                <li><mark className="hl hl-intelligence">intelligence</mark></li>
-                <li><mark className="hl hl-good">good</mark></li>
-                <li><mark className="hl hl-negative">negative</mark></li>
-                <li><mark className="hl hl-evidence">evidence quote</mark></li>
-              </ul>
-            </fieldset>
-            <HighlightedText text={article.content_text} marks={marks} />
-          </div>
-          <aside className="reader-side" aria-label="Analysis">
-            {article.priority ? (
-              <PriorityBreakdown priority={article.priority} />
-            ) : (
-              <section className="panel">
-                <h2>Priority score</h2>
-                <p className="muted">Not scored for the current profile yet.</p>
-              </section>
-            )}
-            <RunPanel articleId={article.id} onRunChange={onRunChange} pollMs={pollMs} />
-          </aside>
-        </div>
-      )}
-    </article>
   )
 }

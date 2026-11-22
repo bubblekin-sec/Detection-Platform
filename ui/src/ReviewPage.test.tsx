@@ -28,6 +28,7 @@ const pending: RuleDetail = {
       stale: false,
     },
   ],
+  run_id: 7,
   reviewer_note: null,
   reviewed_at: null,
   created_at: '2026-11-21T12:00:00Z',

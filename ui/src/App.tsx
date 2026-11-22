@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
 
 import { getRuleCounts } from './api'
-import { ArticleReader, ArticlesPage } from './ArticlesPage'
+import { ArticleReader } from './ArticleReader'
+import { ArticlesPage } from './ArticlesPage'
 import { DashboardPage } from './DashboardPage'
 import { ReviewPage } from './ReviewPage'
+import { parseReaderView } from './readerView'
 import { followLink, normalize, route } from './routes'
 import { SourcesPage } from './SourcesPage'
 
@@ -17,17 +19,19 @@ function current(): Location {
 }
 
 /** Minimal history-based routing (path + query string); swap for a router library if routes nest. */
-function useLocation(): [Location, (href: string) => void] {
+type Navigate = (href: string, options?: { keepScroll?: boolean }) => void
+
+function useLocation(): [Location, Navigate] {
   const [location, setLocation] = useState<Location>(current)
   useEffect(() => {
     const onPop = () => setLocation(current())
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
-  function navigate(href: string) {
+  function navigate(href: string, options: { keepScroll?: boolean } = {}) {
     window.history.pushState(null, '', href)
     setLocation(current())
-    window.scrollTo(0, 0)
+    if (!options.keepScroll) window.scrollTo(0, 0)
   }
   return [location, navigate]
 }
@@ -108,7 +112,16 @@ export function App() {
         )}
         {/* key: a different article remounts the reader, so the previous one never shows under the new URL */}
         {page.page === 'article' && (
-          <ArticleReader key={page.id} id={page.id} onBack={() => navigate(`/articles${queueSearch.current}`)} />
+          <ArticleReader
+            key={page.id}
+            id={page.id}
+            view={parseReaderView(location.search)}
+            // switching between the text views keeps the reader's place in the article
+            onViewChange={(view) => navigate(`/articles/${page.id}?view=${view}`, { keepScroll: view !== 'rules' })}
+            onBack={() => navigate(`/articles${queueSearch.current}`)}
+            onOpenArticle={(id) => navigate(`/articles/${id}`)}
+            onRulesChanged={() => setRulesChanged((count) => count + 1)}
+          />
         )}
         {page.page === 'review' && (
           <ReviewPage

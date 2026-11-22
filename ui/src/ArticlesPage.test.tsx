@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ArticlesPage } from './ArticlesPage'
-import type { ArticleDetail, ArticleSummary, Source } from './api'
+import type { ArticleSummary, Source } from './api'
 import { fakeApi } from './test/fakeApi'
 
 const talosSource = { id: 1, slug: 'cisco_talos', name: 'Cisco Talos' }
@@ -254,122 +254,5 @@ describe('ArticlesPage', () => {
     render(<ArticlesPage onOpen={() => {}} />)
 
     expect(await screen.findByText(/No articles yet/)).toBeInTheDocument()
-  })
-})
-
-describe('ArticleReader', async () => {
-  const { ArticleReader } = await import('./ArticlesPage')
-  const detail: ArticleDetail = { ...lantern, priority: null, content_text: 'First paragraph.\nschtasks /create /tn Updater' }
-
-  it('shows the full text and a link to the original', async () => {
-    fakeApi({ 'GET /api/articles/10': () => ({ status: 200, body: detail }) })
-
-    render(<ArticleReader id={10} onBack={() => {}} />)
-
-    expect(await screen.findByRole('heading', { name: 'Operation Paper Lantern', level: 1 })).toBeInTheDocument()
-    expect(screen.getByText(/schtasks \/create \/tn Updater/)).toHaveTextContent('First paragraph.\nschtasks /create /tn Updater', {
-      normalizeWhitespace: false,
-    })
-    expect(screen.getByRole('link', { name: /Open original/ })).toHaveAttribute('href', lantern.url)
-    expect(screen.getByRole('complementary', { name: 'Analysis' })).toHaveTextContent('Not scored for the current profile yet.')
-  })
-
-  const text = 'Intro.\nThe operators ran schtasks /create /tn Updater and wrote HKLM keys.'
-  const scoredDetail: ArticleDetail = {
-    ...lantern,
-    content_text: text,
-    priority: {
-      score: 47.5,
-      band: 'Fair',
-      terms: { perfect: ['schtasks', 'hklm'], lolbas: [], intelligence: [] },
-      threshold: 37.5,
-      profile_version: 2,
-      stale: false,
-      buckets: { perfect: { terms: ['hklm', 'schtasks'], count: 2, points: 56.25, max_points: 75 } },
-      spans: [
-        { start: text.indexOf('schtasks'), end: text.indexOf('schtasks') + 8, bucket: 'perfect', term: 'schtasks' },
-        { start: text.indexOf('HKLM'), end: text.indexOf('HKLM') + 4, bucket: 'perfect', term: 'hklm' },
-      ],
-      spans_truncated: false,
-    },
-  }
-  const evidenceStart = text.indexOf('ran schtasks')
-  const run = {
-    id: 7, article_id: 10, profile: { slug: 'detection', version: 2 }, status: 'succeeded', current_step: null,
-    error: null, created_at: '2026-11-21T12:00:00Z', started_at: null, finished_at: null, stages: [], rules: [],
-    observables: [{
-      id: 1, field_name: 'scheduled_tasks', value: 'schtasks /create /tn Updater', evidence: 'ran schtasks /create /tn Updater',
-      evidence_verified: true, tags: {}, evidence_span: { start: evidenceStart, end: evidenceStart + 'ran schtasks /create /tn Updater'.length },
-    }],
-  }
-
-  function marked(): string[] {
-    return Array.from(document.querySelectorAll('.article-text-marked mark')).map(
-      (mark) => `${mark.className}|${mark.textContent}`,
-    )
-  }
-
-  it('highlights keywords and the evidence of the latest run beside the score breakdown', async () => {
-    fakeApi({
-      'GET /api/articles/10': () => ({ status: 200, body: scoredDetail }),
-      'GET /api/articles/10/runs': () => ({ status: 200, body: [run] }),
-    })
-
-    render(<ArticleReader id={10} onBack={() => {}} />)
-
-    expect(await screen.findByRole('region', { name: 'Priority score' })).toHaveTextContent('47.5, Fair')
-    expect(await screen.findByLabelText('Evidence (1)')).toBeChecked()
-    expect(marked()).toEqual([
-      'hl hl-evidence|ran ',
-      'hl hl-evidence hl-perfect|schtasks',
-      'hl hl-evidence| /create /tn Updater',
-      'hl hl-perfect|HKLM',
-    ])
-  })
-
-  it('marks evidence when a running run finishes, and clears it when detection runs again', async () => {
-    const running = { ...run, status: 'running', observables: [] }
-    let polls = 0
-    fakeApi({
-      'GET /api/articles/10': () => ({ status: 200, body: scoredDetail }),
-      'GET /api/articles/10/runs': () => ({ status: 200, body: [running] }),
-      'GET /api/runs/7': () => ({ status: 200, body: ++polls < 2 ? running : run }),
-      'POST /api/articles/10/runs': () => ({ status: 202, body: { ...run, id: 8, status: 'queued', observables: [] } }),
-      'GET /api/runs/8': () => ({ status: 200, body: { ...run, id: 8, status: 'queued', observables: [] } }),
-    })
-    const user = userEvent.setup()
-    render(<ArticleReader id={10} onBack={() => {}} pollMs={5} />)
-    expect(await screen.findByLabelText('Evidence (0)')).toBeInTheDocument()
-
-    expect(await screen.findByLabelText('Evidence (1)')).toBeInTheDocument()
-    expect(marked()).toContain('hl hl-evidence| /create /tn Updater')
-
-    await user.click(screen.getByRole('button', { name: 'Run again' }))
-    expect(await screen.findByLabelText('Evidence (0)')).toBeInTheDocument()
-    expect(marked().some((mark) => mark.includes('hl-evidence'))).toBe(false)
-  })
-
-  it('toggles each kind of highlight', async () => {
-    fakeApi({
-      'GET /api/articles/10': () => ({ status: 200, body: scoredDetail }),
-      'GET /api/articles/10/runs': () => ({ status: 200, body: [run] }),
-    })
-    const user = userEvent.setup()
-    render(<ArticleReader id={10} onBack={() => {}} />)
-    await screen.findByLabelText('Evidence (1)')
-
-    await user.click(screen.getByLabelText('Keywords (2)'))
-    expect(marked()).toEqual(['hl hl-evidence|ran schtasks /create /tn Updater'])
-
-    await user.click(screen.getByLabelText('Evidence (1)'))
-    expect(marked()).toEqual([])
-  })
-
-  it('reports a missing article', async () => {
-    fakeApi({ 'GET /api/articles/99': () => ({ status: 404, body: { detail: { errors: ['Article 99 not found.'] } } }) })
-
-    render(<ArticleReader id={99} onBack={() => {}} />)
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Article 99 not found.')
   })
 })

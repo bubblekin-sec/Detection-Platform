@@ -235,10 +235,6 @@ h2 {
   overflow-y: auto;
 }
 
-.reader-side .run-panel {
-  margin: 0;
-}
-
 .reader-side,
 .reader-side > * {
   min-width: 0; /* long Sigma lines and chips scroll or wrap inside the column instead of widening it */
@@ -269,6 +265,9 @@ h2 {
     grid-template-columns: minmax(0, 1fr);
   }
   .reader-side {
+    order: -1; /* the stage's findings first; the text follows */
+  }
+  .reader-side {
     position: static;
     max-height: none;
     overflow: visible;
@@ -282,10 +281,6 @@ h2 {
 
 .reader .back {
   padding-left: 0;
-}
-
-.run-panel {
-  margin: 16px 0 24px;
 }
 
 .run-queued {
@@ -309,16 +304,88 @@ h2 {
   margin-top: 6px;
 }
 
-.run-header {
+/* Article page: title and run controls, then the pipeline as a row of stage outcomes that picks the view. */
+.reader-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 12px;
 }
 
-.run-header h2 {
+.reader-title {
+  min-width: 0;
+}
+
+.reader-title p {
+  margin: 4px 0 0;
+}
+
+.run-line {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  flex: 0 0 auto;
+  max-width: 320px;
+  text-align: right;
+}
+
+.run-line p {
   margin: 0;
+}
+
+.stage-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  margin: 0 0 20px;
+  overflow: hidden;
+}
+
+.stage {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 10px 14px;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  font-size: 0.9rem;
+}
+
+.stage + .stage {
+  border-left: 1px solid var(--border);
+}
+
+.stage:hover {
+  color: var(--text);
+}
+
+.stage.is-selected {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.stage-name {
+  font-weight: 650;
+  color: var(--text);
+}
+
+.rules-view {
+  max-width: 980px;
+}
+
+@media (max-width: 1000px) {
+  .reader-header {
+    flex-direction: column;
+  }
+  .run-line {
+    justify-items: start;
+    text-align: left;
+    max-width: none;
+  }
 }
 
 .verdict p {
@@ -553,7 +620,7 @@ h2 {
   font-size: 0.88rem;
 }
 
-.group-problems h4 {
+.group-problems h3 {
   margin: 0 0 6px;
   font-size: 0.9rem;
 }
@@ -864,6 +931,16 @@ tbody tr:last-child > * {
   max-width: 1200px;
   width: 100%;
   margin: 0;
+}
+
+@media (max-width: 560px) {
+  .stage-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .stage + .stage {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
 }
 
 @media (max-width: 760px) {

@@ -31,6 +31,7 @@ class ArticleRef(BaseModel):
 
 
 class RuleDetail(RuleOut):
+    run_id: int
     reviewer_note: str | None
     reviewed_at: datetime | None
     created_at: datetime
@@ -68,6 +69,7 @@ class RuleUpdate(BaseModel):
 def _detail(rule: DetectionRule, article: Article, inventory: frozenset[str]) -> RuleDetail:
     return RuleDetail(
         **rule_out(rule, inventory).model_dump(),
+        run_id=rule.run_id,
         reviewer_note=rule.reviewer_note,
         reviewed_at=rule.reviewed_at,
         created_at=rule.created_at,
@@ -90,12 +92,15 @@ def list_rules(
     session: SessionDep,
     inventory: TelemetryDep,
     status: RuleStatus | None = None,
+    article_id: int | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> list[RuleDetail]:
     query = select(DetectionRule, Article).join(Article, Article.id == DetectionRule.article_id)
     query = query.options(selectinload(DetectionRule.queries))
     if status is not None:
         query = query.where(DetectionRule.status == status)
+    if article_id is not None:
+        query = query.where(DetectionRule.article_id == article_id)
     query = query.order_by(DetectionRule.created_at.desc(), DetectionRule.run_id.desc(), DetectionRule.position).limit(limit)
     return [_detail(rule, article, inventory) for rule, article in session.execute(query)]
 

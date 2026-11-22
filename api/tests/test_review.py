@@ -257,3 +257,29 @@ def test_more_invalid_updates_are_422_in_the_standard_shape(api, rule, payload):
     assert response.status_code == 422
     errors = response.json()["detail"]["errors"]
     assert errors and all(isinstance(error, str) for error in errors)
+
+
+def test_list_one_articles_rules_in_every_status_with_their_run(api, rule, db_session):
+    other = Article(source_id=db_session.get(Article, rule.article_id).source_id, url="https://r.example.com/other",
+                    title="Other", content_text="y" * 600, content_hash="h-other", word_count=100)
+    db_session.add(other)
+    db_session.commit()
+    api.patch(f"/api/rules/{rule.id}", json={"status": "approved"})
+
+    listed = api.get(f"/api/rules?article_id={rule.article_id}").json()
+
+    assert [(item["id"], item["status"], item["run_id"]) for item in listed] == [(rule.id, "approved", rule.run_id)]
+    assert api.get(f"/api/rules?article_id={other.id}").json() == []
+    other_run = PipelineRun(article_id=other.id, profile_version_id=db_session.get(PipelineRun, rule.run_id).profile_version_id,
+                            status="succeeded")
+    db_session.add(other_run)
+    db_session.flush()
+    other_id = str(uuid.uuid4())
+    db_session.add(DetectionRule(id=other_id, run_id=other_run.id, article_id=other.id, position=0, group_key={},
+                                 observable_ids=[], title="Other rule", sigma_yaml=SIGMA.format(id=other_id), sigma_hash="h",
+                                 status="pending_review"))
+    db_session.commit()
+    both = lambda article_id, status: [item["id"] for item in api.get(f"/api/rules?article_id={article_id}&status={status}").json()]  # noqa: E731
+    assert both(rule.article_id, "approved") == [rule.id]
+    assert both(rule.article_id, "pending_review") == []
+    assert both(other.id, "pending_review") == [other_id]

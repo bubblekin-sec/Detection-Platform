@@ -26,7 +26,7 @@ export function RuleCard({
   return (
     <article className="rule-card" aria-labelledby={`rule-${rule.id}`}>
       <header className="rule-header">
-        <h4 id={`rule-${rule.id}`}>{rule.title}</h4>
+        <h4 id={`rule-${rule.id}`} tabIndex={-1}>{rule.title}</h4>
         <p className="tag-row">
           <span className={`rule-status rule-status-${rule.status}`}>{STATUS_LABELS[rule.status]}</span>
           {rule.level && <span className="observable-tag">level: {rule.level}</span>}
