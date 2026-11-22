@@ -13,6 +13,7 @@ from app.pipeline.run import queue_run
 from app.pipeline.scoring import score_articles
 from app.profiles.huntable_keywords import load_huntable_priority
 from app.profiles.seed import latest_version, seed_profiles
+from app.rules.duplicates import recompute_all
 from app.sources.fetch import build_fetcher
 from app.sources.ingest import SourceFetchFailed, ingest_source
 from app.sources.seed import seed_sources
@@ -42,6 +43,9 @@ def main(argv: list[str] | None = None) -> int:
     rescore = commands.add_parser("score-articles", help="Store priority scores for the profile's latest version. Never queues runs.")
     rescore.add_argument("--profile", default="detection")
     rescore.add_argument("--missing", action="store_true", help="Only articles with no current score for that version (unscored, or scored by an older scorer).")
+    commands.add_parser(
+        "dedup-rules", help="Recompute which rules duplicate an earlier one (same log source, near-identical values)."
+    )
     args = parser.parse_args(argv)
 
     settings = Settings()
@@ -63,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
                 exit_code = _queue_runs(session, args)
             elif args.command == "score-articles":
                 exit_code = _score_articles(session, args)
+            elif args.command == "dedup-rules":
+                print(f"Rules flagged as duplicates: {recompute_all(session)}")
             elif args.command == "priority-report":
                 print(priority_report(session, load_huntable_priority(extra_dropped=set(args.drop))))
     finally:

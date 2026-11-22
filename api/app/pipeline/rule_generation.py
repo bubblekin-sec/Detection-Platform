@@ -109,10 +109,12 @@ def generate_rules(
             log.exception("Rule generation failed for group %s", group)
             outcome |= {"outcome": "error", "error": f"Internal error ({type(error).__name__})."}
         result.groups.append(outcome)
-        if outcome.get("outcome") == "llm_error" and not outcome.get("refusal"):
-            # Auth, model, rate-limit or connection problems will repeat for every group: stop spending time.
-            stop_reason = f"Skipped after an earlier group failed: {outcome['error']}"
+        if outcome.get("outcome") == "llm_error":
             result.first_error = result.first_error or outcome["error"]
+            if outcome.get("systemic"):
+                # Auth, model access, rate limit or outage will repeat for every group: stop spending time. A refusal
+                # or a one-off failure (token limit, malformed output) only costs this group its rule.
+                stop_reason = f"Skipped after an earlier group failed: {outcome['error']}"
         elif outcome.get("lint_repair_systemic"):
             stop_reason = f"Skipped after an earlier group's lint repair failed: {outcome['lint_repair_error']}"
         elif outcome.get("kql_systemic"):
@@ -135,7 +137,8 @@ def _generate_group(llm, settings, result, group, items, outcome, totals, on_pro
         try:
             response = _sigma_call(llm, settings, result.system_prompt, user, totals, on_progress)
         except LLMError as error:
-            outcome |= {"outcome": "llm_error", "error": str(error), "refusal": isinstance(error, LLMRefusal)}
+            outcome |= {"outcome": "llm_error", "error": str(error), "refusal": isinstance(error, LLMRefusal),
+                        "systemic": error.systemic}
             if errors:
                 outcome["errors"] = errors  # keep why the previous attempt was rejected
             return None

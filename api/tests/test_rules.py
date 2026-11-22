@@ -448,12 +448,20 @@ def test_an_internal_error_in_one_group_keeps_the_other_groups_rules(api, articl
     assert outcomes == {"created", "error"}
 
 
-def test_a_non_refusal_llm_error_stops_the_remaining_groups(api, article, factory):
-    from app.llm.client import LLMError
-
+def test_a_one_off_sigma_call_error_costs_only_that_group(api, article, factory):
     body, llm = run_with(
         api, article, factory, extraction(("scheduled_tasks", TASK), ("registry_artifacts", RUN_KEY)),
-        LLMError("Anthropic rejected the API key (401). Check ANTHROPIC_API_KEY in api/.env."),
+        LLMError("The response hit the 16000-token limit before finishing."), draft(REGISTRY_RULE),
+    )
+
+    assert [group["outcome"] for group in body["stages"][-1]["output"]["groups"]] == ["llm_error", "created"]
+    assert body["status"] == "succeeded" and len(body["rules"]) == 1
+
+
+def test_a_systemic_llm_error_stops_the_remaining_groups(api, article, factory):
+    body, llm = run_with(
+        api, article, factory, extraction(("scheduled_tasks", TASK), ("registry_artifacts", RUN_KEY)),
+        LLMError("Anthropic rejected the API key (401). Check ANTHROPIC_API_KEY in api/.env.", systemic=True),
     )
 
     assert len([call for call in llm.calls if call["schema"] == "SigmaDraft"]) == 1
@@ -666,3 +674,47 @@ def test_an_internal_error_while_checking_model_kql_keeps_the_sigma_rule(api, ar
     assert rule["queries"][1]["status"] == "failed" and "could not be checked" in rule["queries"][1]["error"]
     assert body["stages"][-1]["output"]["groups"][0]["outcome"] == "created"
 
+
+
+def test_a_rerun_that_repeats_a_rule_flags_it_as_a_duplicate_of_the_original(api, article, factory):
+    first, _ = run_with(api, article, factory, extraction(("scheduled_tasks", TASK)), draft(PROCESS_RULE))
+    (original,) = first["rules"]
+    assert original["duplicate_of"] is None
+
+    second, _ = run_with(api, article, factory, extraction(("scheduled_tasks", TASK)), draft(PROCESS_RULE, title="Again"))
+
+    (repeat,) = second["rules"]
+    assert repeat["status"] == "pending_review"  # flagged, never dropped
+    assert repeat["duplicate_of"] == {
+        "id": original["id"], "title": original["title"], "status": "pending_review", "article_id": article.id, "similarity": 1.0,
+    }
+    listed = {rule["id"]: rule for rule in api.get("/api/rules?status=pending_review").json()}
+    assert listed[repeat["id"]]["duplicate_of"]["id"] == original["id"]
+
+
+def test_a_rejected_rule_is_never_the_original_and_the_batch_pass_agrees(api, article, factory, db_session):
+    from app.rules.duplicates import recompute_all
+
+    first, _ = run_with(api, article, factory, extraction(("scheduled_tasks", TASK)), draft(PROCESS_RULE))
+    rejected = first["rules"][0]["id"]
+    assert api.patch(f"/api/rules/{rejected}", json={"status": "rejected"}).status_code == 200
+
+    second, _ = run_with(api, article, factory, extraction(("scheduled_tasks", TASK)), draft(PROCESS_RULE))
+    third, _ = run_with(api, article, factory, extraction(("scheduled_tasks", TASK)), draft(PROCESS_RULE))
+
+    assert second["rules"][0]["duplicate_of"] is None
+    assert third["rules"][0]["duplicate_of"]["id"] == second["rules"][0]["id"]
+    assert recompute_all(db_session) == 1  # the same answer from scratch, and idempotent
+    assert recompute_all(db_session) == 1
+    assert api.get(f"/api/rules/{third['rules'][0]['id']}").json()["duplicate_of"]["id"] == second["rules"][0]["id"]
+
+
+def test_rejecting_an_original_clears_the_flag_on_its_duplicates(api, article, factory):
+    first, _ = run_with(api, article, factory, extraction(("scheduled_tasks", TASK)), draft(PROCESS_RULE))
+    second, _ = run_with(api, article, factory, extraction(("scheduled_tasks", TASK)), draft(PROCESS_RULE))
+    original, repeat = first["rules"][0]["id"], second["rules"][0]["id"]
+    assert api.get(f"/api/rules/{repeat}").json()["duplicate_of"]["id"] == original
+
+    assert api.patch(f"/api/rules/{original}", json={"status": "rejected"}).status_code == 200
+
+    assert api.get(f"/api/rules/{repeat}").json()["duplicate_of"] is None

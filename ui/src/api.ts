@@ -124,6 +124,8 @@ export interface DetectionRule {
   sigma_hash: string
   rationale: string | null
   queries: RuleQuery[]
+  /** An earlier rule with the same log source and near-identical values (Jaccard `similarity`). */
+  duplicate_of?: { id: string; title: string; status: DetectionRule['status']; article_id: number; similarity: number } | null
 }
 
 export interface RuleDetail extends DetectionRule {
@@ -214,6 +216,17 @@ export const listArticleRuns = (articleId: number) => request<PipelineRun[]>('GE
 export const queueRun = (articleId: number, profile = 'detection') =>
   request<PipelineRun>('POST', `/api/articles/${articleId}/runs`, { profile })
 export const getRun = (id: number) => request<PipelineRun>('GET', `/api/runs/${id}`)
+export const cancelRun = (id: number) => request<PipelineRun>('POST', `/api/runs/${id}/cancel`)
+
+/** Whether a worker is processing the queue (a heartbeat in the last 30 s). */
+export interface WorkerStatus {
+  alive: boolean
+  last_seen_at: string | null
+  queued: number
+  running: number
+  orphaned: number // running runs whose worker stopped
+}
+export const getWorkerStatus = () => request<WorkerStatus>('GET', '/api/worker')
 /** Same-origin download of every approved rule as one multi-document Sigma YAML file. */
 export const RULES_EXPORT_URL = '/api/rules/export'
 export const listRules = (status: DetectionRule['status']) => request<RuleDetail[]>('GET', `/api/rules?status=${status}`)

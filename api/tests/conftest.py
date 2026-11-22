@@ -58,7 +58,7 @@ def migrated_engine(test_settings):
 @pytest.fixture
 def db_session(migrated_engine):
     with migrated_engine.begin() as connection:
-        connection.execute(text("TRUNCATE TABLE rule_queries, detection_rules, observables, stage_results, pipeline_runs, article_scores, profile_versions, profiles, articles, sources RESTART IDENTITY CASCADE"))
+        connection.execute(text("TRUNCATE TABLE worker_heartbeats, rule_queries, detection_rules, observables, stage_results, pipeline_runs, article_scores, profile_versions, profiles, articles, sources RESTART IDENTITY CASCADE"))
     with sessionmaker(migrated_engine)() as session:
         yield session
 

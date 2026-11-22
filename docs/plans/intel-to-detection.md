@@ -1,6 +1,6 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: increments 1 to 9 done, plus the priority and workbench phase in [priority-and-workbench.md](priority-and-workbench.md). Next: increment 10 (batch dedup). Azure provisioning is a separate task; its inputs are listed in "Increment 9 notes".
+Status: all increments (1 to 10) done, plus the priority and workbench phase in [priority-and-workbench.md](priority-and-workbench.md). Azure provisioning is a separate task; its inputs are listed in "Increment 9 notes". Further work is in "Deferred".
 
 **7 notes (review).**
 - **API:**
@@ -301,8 +301,9 @@ Filter documents are applied to the rule they reference. Backend-unsupported fea
 - **Prompt injection from article text.** LLM output is constrained by a pydantic schema and Sigma validation, and nothing it produces is executed.
 - **SSRF from user-added sources.** `POST /api/sources` allows only http/https, but it still accepts `http://localhost/` and `http://169.254.169.254/`. Before increment 3 fetches any user-supplied URL, the fetcher must resolve the host and refuse loopback, private, link-local and metadata addresses. It must re-check after every redirect and cap response size. Egress policy is an enterprise input.
 - **LLM cost.** Relevance gates extraction, token usage is stored per stage, and there is no automatic schedule in the MVP.
-- **Stale `running` runs after a crash.** Re-running creates a new run. Reclaiming stale runs is deferred.
-- **Duplicate rules on re-run.** Accepted until increment 10.
+- **Stale `running` runs after a crash.** A worker fails any run with no progress for `RUN_STALE_AFTER_SECONDS` (30 min) so it can be run again.
+- **Queued runs with no worker.** Runs only move when a worker is running. The worker beats every 10 s from a background thread (so a long model call doesn't hide it) and is alive while its heartbeat is under 30 s old, by the database clock. The article page says when none is running (with the start command) and lets the reviewer cancel the queued run (decided 2026-11-22 after "Run detection just stalls"). A run records the worker that claimed it, so a run whose worker was killed is shown as stopped, can be cancelled at once, and is failed by the next worker instead of after 30 minutes. Heartbeat rows older than a day are pruned.
+- **Duplicate rules on re-run (increment 10).** A new rule is flagged `duplicate_of` an earlier non-rejected rule with the same log source and near-identical `field=value` set (Jaccard ≥ 0.80, or containment with ≥ 3 values and Jaccard ≥ 0.60; values case-folded, modifiers ignored, `\\` read as `\`). It is never dropped: the tokens are spent and the reviewer decides. An approved original is preferred. The flag reflects the rules at generation time; a reviewer's edit doesn't recompute it, and `cli dedup-rules` recomputes everything.
 
 ## Deferred
 

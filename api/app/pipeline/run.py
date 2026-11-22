@@ -21,6 +21,8 @@ from app.models import (
 )
 from app.pipeline.junk import junk_reason
 from app.pipeline.rule_generation import generate_rules
+from app.pipeline.workers import fail_orphaned_runs
+from app.rules.duplicates import mark_duplicates
 from app.profiles.compile import compile_extraction, compile_relevance, render_article, unescape_markup
 from app.profiles.schema import ProfileDefinition, RelevanceVerdict, extraction_schema
 
@@ -81,7 +83,7 @@ def fail_stalled_runs(session: Session, now: datetime, stale_after: timedelta) -
     return stalled
 
 
-def claim_next_run(session: Session, now: datetime) -> int | None:
+def claim_next_run(session: Session, now: datetime, worker_id: str | None = None) -> int | None:
     run = session.scalars(
         select(PipelineRun)
         .where(PipelineRun.status == "queued")
@@ -94,17 +96,21 @@ def claim_next_run(session: Session, now: datetime) -> int | None:
         session.rollback()
         return None
     run.status, run.started_at, run.heartbeat_at, run.current_step = "running", now, now, "junk_filter"
+    run.claimed_by = worker_id
     session.commit()
     return run.id
 
 
 def process_next_run(
-    session_factory: sessionmaker[Session], llm: LLMClient, settings: Settings, *, clock: Clock = _utcnow
+    session_factory: sessionmaker[Session], llm: LLMClient, settings: Settings, *, clock: Clock = _utcnow,
+    worker_id: str | None = None,
 ) -> int | None:
-    """Claim and execute one run. Returns its id, or None when the queue is empty."""
+    """Claim and execute one run. Returns its id, or None when the queue is empty. `worker_id` is the caller's
+    heartbeat id: a run claimed under it is failed as soon as that worker stops beating."""
     with session_factory() as session:
         fail_stalled_runs(session, clock(), timedelta(seconds=settings.run_stale_after_seconds))
-        run_id = claim_next_run(session, clock())
+        fail_orphaned_runs(session)
+        run_id = claim_next_run(session, clock(), worker_id)
     if run_id is None:
         return None
     try:
@@ -308,7 +314,9 @@ def _record(
         for observable in observables or []:
             observable.run_id = run_id
             session.add(observable)
-        session.add_all(rules or [])
+        if rules:
+            mark_duplicates(session, rules)  # flags, never drops
+            session.add_all(rules)
         session.execute(update(PipelineRun).where(PipelineRun.id == run_id).values(heartbeat_at=stage.finished_at))
         session.commit()
 

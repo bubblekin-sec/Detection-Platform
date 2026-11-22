@@ -29,6 +29,31 @@ const rule: DetectionRule = {
 }
 
 describe('RuleCard', () => {
+  it('flags a likely duplicate with the original rule and its article', () => {
+    const original = { id: 'o-1', title: 'Original Task Rule', status: 'approved' as const, article_id: 42, similarity: 0.857 }
+    render(<RuleCard rule={{ ...rule, duplicate_of: original }} />)
+
+    const note = screen.getByRole('note', { name: `Possible duplicate: ${rule.title}` })
+    expect(note).toHaveTextContent('Likely duplicate of “Original Task Rule” (approved, 86% of detection values shared')
+    expect(within(note).getByRole('link', { name: 'from article #42' })).toHaveAttribute('href', '/articles/42')
+  })
+
+  it('opens the original article in place when the page can navigate', async () => {
+    const opened: number[] = []
+    const original = { id: 'o-1', title: 'Original', status: 'pending_review' as const, article_id: 42, similarity: 1 }
+    render(<RuleCard rule={{ ...rule, duplicate_of: original }} onOpenArticle={(id) => opened.push(id)} />)
+
+    screen.getByRole('link', { name: 'from article #42' }).click()
+
+    expect(opened).toEqual([42])
+  })
+
+  it('has no duplicate note for an original rule', () => {
+    render(<RuleCard rule={{ ...rule, duplicate_of: null }} />)
+
+    expect(screen.queryByText(/Likely duplicate/)).not.toBeInTheDocument()
+  })
+
   it('shows the Sigma, the converted query and the review status', () => {
     render(<RuleCard rule={rule} />)
 

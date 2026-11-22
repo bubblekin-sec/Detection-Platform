@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import type { DetectionRule } from './api'
+import { followLink } from './routes'
 
 const TARGET_LABELS: Record<string, string> = { defender_xdr: 'Defender XDR KQL' }
 const ORIGIN_LABELS: Record<string, string> = { converted: 'converted from Sigma', llm: 'written by the model', human_edit: 'edited' }
@@ -11,7 +12,17 @@ const STATUS_LABELS: Record<DetectionRule['status'], string> = {
 }
 
 /** One generated rule: Sigma of record plus its query artifacts, with conversion errors and lint warnings. */
-export function RuleCard({ rule, header, children }: { rule: DetectionRule; header?: ReactNode; children?: ReactNode }) {
+export function RuleCard({
+  rule,
+  header,
+  children,
+  onOpenArticle,
+}: {
+  rule: DetectionRule
+  header?: ReactNode
+  children?: ReactNode
+  onOpenArticle?: (id: number) => void // navigate in place (keeps unsaved edits elsewhere on the page)
+}) {
   return (
     <article className="rule-card" aria-labelledby={`rule-${rule.id}`}>
       <header className="rule-header">
@@ -24,6 +35,21 @@ export function RuleCard({ rule, header, children }: { rule: DetectionRule; head
           </span>
         </p>
       </header>
+      {rule.duplicate_of && (
+        <p className="banner banner-info duplicate-note" role="note" aria-label={`Possible duplicate: ${rule.title}`}>
+          <strong>Likely duplicate</strong> of “{rule.duplicate_of.title}” ({STATUS_LABELS[rule.duplicate_of.status].toLowerCase()},{' '}
+          {Math.round(rule.duplicate_of.similarity * 100)}% of detection values shared,{' '}
+          <a
+            href={`/articles/${rule.duplicate_of.article_id}`}
+            onClick={
+              onOpenArticle && ((event) => followLink(event, () => onOpenArticle(rule.duplicate_of!.article_id)))
+            }
+          >
+            from article #{rule.duplicate_of.article_id}
+          </a>
+          ). Compare before approving both.
+        </p>
+      )}
       {header}
       {rule.rationale && <p className="muted small">{rule.rationale}</p>}
 

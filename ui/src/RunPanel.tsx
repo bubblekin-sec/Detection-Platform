@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
 
 import {
+  cancelRun,
   describeError,
   getRun,
+  getWorkerStatus,
   listArticleRuns,
   queueRun,
   type Observable,
   type PipelineRun,
   type StageResult,
+  type WorkerStatus,
 } from './api'
 import { RuleCard } from './RuleCard'
 
@@ -73,6 +76,40 @@ export function RunPanel({
     }
   }, [active, runId, pollMs])
 
+  // While the run is queued or running, say whether a worker is there to pick it up or finish it.
+  const queued = run?.status === 'queued'
+  const [worker, setWorker] = useState<WorkerStatus | null>(null)
+  useEffect(() => {
+    if (!active) return
+    let cancelled = false
+    const check = () =>
+      getWorkerStatus()
+        .then((status) => !cancelled && setWorker(status))
+        .catch(() => !cancelled && setWorker(null)) // unknown: fall back to the plain queued message
+    check()
+    const timer = setInterval(check, pollMs)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [active, pollMs])
+  const workerGone = worker !== null && !worker.alive
+
+  const [cancelling, setCancelling] = useState(false)
+  async function cancel() {
+    if (!run) return
+    setError(null)
+    setCancelling(true)
+    try {
+      setRun(await cancelRun(run.id))
+    } catch (failure) {
+      // 409: a live worker started (or still holds) it; the next poll shows its progress.
+      setError(`Could not cancel the run: ${describeError(failure)}`)
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   async function start() {
     setError(null)
     setQueueing(true)
@@ -102,10 +139,50 @@ export function RunPanel({
         </p>
       )}
       {run === null && <p className="muted">Not run yet.</p>}
-      {run && active && (
+      {run?.status === 'running' && !workerGone && (
         <p className="muted" role="status">
-          {run.status === 'queued' ? 'Queued. Waiting for the worker…' : `Running: ${run.current_step ?? 'starting'}…`}
+          Running: {run.current_step ?? 'starting'}…
         </p>
+      )}
+      {run?.status === 'running' && workerGone && (
+        <div className="run-queued">
+          <p className="banner banner-error" role="alert">
+            <strong>The worker processing this run stopped</strong> during {run.current_step ?? 'its first step'}. Cancel
+            it and run detection again (a new worker also fails it when it starts).
+          </p>
+          <button type="button" className="secondary" onClick={cancel} disabled={cancelling}>
+            Cancel run
+          </button>
+        </div>
+      )}
+      {queued && (
+        <div className="run-queued">
+          {workerGone ? (
+            <div className="banner banner-info" role="status">
+              <p>
+                <strong>No worker is running</strong>, so this run is waiting. Start one, then it begins on its own:
+              </p>
+              <ul>
+                <li>
+                  in <code>api/</code>: <code>uv run python -m app.worker</code> (add <code>--once</code> to stop when the
+                  queue is empty)
+                </li>
+                <li>
+                  or in the repo root: <code>docker compose --profile worker up -d</code>
+                </li>
+              </ul>
+            </div>
+          ) : (
+            <p className="muted" role="status">
+              {worker?.alive && worker.running > 0
+                ? 'Queued. The worker is busy and will pick this one up when it is free.'
+                : 'Queued. Waiting for the worker…'}
+            </p>
+          )}
+          <button type="button" className="secondary" onClick={cancel} disabled={cancelling}>
+            Cancel run
+          </button>
+        </div>
       )}
       {run?.status === 'failed' && (
         <p className="banner banner-error" role="alert">

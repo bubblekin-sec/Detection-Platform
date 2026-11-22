@@ -198,7 +198,7 @@ function ReviewItem({
   )
 
   return (
-    <RuleCard rule={rule} header={header}>
+    <RuleCard rule={rule} header={header} onOpenArticle={onOpenArticle}>
       <div className="review-actions">
         <label className="field">
           <span>Reviewer note</span>

@@ -14,6 +14,7 @@ from app.detection.rules import identity_error, pin_platform_fields
 from app.detection.sigma import parse_sigma
 from app.models import RULE_STATUSES, Article, DetectionRule, RuleQuery
 from app.pipeline.rule_generation import converted_query, rule_level, sigma_digest
+from app.rules.duplicates import release_duplicates_of
 from app.rules.export import export_rules
 from app.runs.router import RuleOut, rule_out
 
@@ -166,6 +167,8 @@ def update_rule(rule_id: str, body: RuleUpdate, session: SessionDep) -> RuleDeta
     if "status" in changes:
         rule.status = body.status
         rule.reviewed_at = now if body.status != "pending_review" else None
+        if body.status == "rejected":
+            release_duplicates_of(session, rule.id)
     if "reviewer_note" in changes:
         rule.reviewer_note = body.reviewer_note
 

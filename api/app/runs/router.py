@@ -1,15 +1,16 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.db import get_session
 from app.models import Article, DetectionRule, PipelineRun, ProfileVersion
 from app.pipeline.priority import FoldedText
 from app.pipeline.run import queue_run
+from app.pipeline.workers import ORPHANED, cancellable, worker_status
 from app.profiles.seed import latest_version
 
 router = APIRouter(tags=["runs"])
@@ -60,6 +61,16 @@ class QueryOut(BaseModel):
     stale: bool = False
 
 
+class DuplicateRef(BaseModel):
+    """The earlier rule this one nearly repeats (same log source; `similarity` is the Jaccard of their values)."""
+
+    id: str
+    title: str
+    status: str
+    article_id: int
+    similarity: float
+
+
 class RuleOut(BaseModel):
     id: str
     title: str
@@ -71,9 +82,11 @@ class RuleOut(BaseModel):
     sigma_hash: str  # send back as expected_sigma_hash so approvals only apply to what the reviewer saw
     rationale: str | None
     queries: list[QueryOut]
+    duplicate_of: DuplicateRef | None = None
 
 
 def rule_out(rule: DetectionRule) -> RuleOut:
+    original = rule.duplicate
     return RuleOut(
         id=rule.id, title=rule.title, level=rule.level, status=rule.status, group=rule.group_key,
         observable_ids=rule.observable_ids, sigma_yaml=rule.sigma_yaml, sigma_hash=rule.sigma_hash, rationale=rule.rationale,
@@ -81,6 +94,10 @@ def rule_out(rule: DetectionRule) -> RuleOut:
             QueryOut.model_validate(query).model_copy(update={"stale": query.source_sigma_hash != rule.sigma_hash})
             for query in rule.queries
         ],
+        duplicate_of=DuplicateRef(
+            id=original.id, title=original.title, status=original.status, article_id=original.article_id,
+            similarity=rule.duplicate_similarity or 0.0,
+        ) if original is not None else None,
     )
 
 
@@ -164,6 +181,45 @@ def create_run(article_id: int, body: RunCreate, session: SessionDep, response: 
         response.status_code = 200
     loaded = _load(session, run.id)
     return _out(loaded, _article_text(session, article_id) if _has_evidence(loaded) else None)
+
+
+CANCELLED = "Cancelled before it started."
+
+
+@router.post("/api/runs/{run_id}/cancel", response_model=RunOut)
+def cancel_run(run_id: int, session: SessionDep) -> RunOut:
+    """Cancel a queued run, or a running one whose worker stopped (it ends `failed`, so the article can be queued
+    again). A run a live worker is processing can't be cancelled: it is already spending, and the worker finishes it."""
+    was_queued = session.scalar(select(PipelineRun.status).where(PipelineRun.id == run_id)) == "queued"
+    cancelled = session.execute(
+        update(PipelineRun)
+        .where(PipelineRun.id == run_id, cancellable())
+        .values(status="failed", error=CANCELLED if was_queued else ORPHANED, finished_at=datetime.now(UTC))
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    session.commit()
+    run = _load(session, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail={"errors": [f"Run {run_id} not found."]})
+    if not cancelled:
+        raise HTTPException(status_code=409, detail={"errors": [
+            f"Run {run_id} is {run.status}; only a queued run, or one whose worker stopped, can be cancelled."
+        ]})
+    return _out(run, None)
+
+
+class WorkerStatusOut(BaseModel):
+    alive: bool
+    last_seen_at: datetime | None
+    queued: int
+    running: int
+    orphaned: int  # running runs whose worker stopped: cancel them and run again
+
+
+@router.get("/api/worker", response_model=WorkerStatusOut)
+def get_worker_status(session: SessionDep) -> WorkerStatusOut:
+    """Whether a worker is processing the queue, so a waiting run can say why."""
+    return WorkerStatusOut(**vars(worker_status(session)))
 
 
 @router.get("/api/runs/{run_id}", response_model=RunOut)

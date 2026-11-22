@@ -84,7 +84,7 @@ Status: P1–P12 done. Increment 8 (YAML export) done; next is increment 9 (cont
 - A Sigma edit in review always adds a fresh `converted` artifact, even under the `llm` strategy; the model-written artifact is marked stale and can be replaced by hand-edited KQL.
 - The Defender XDR catalog used by the KQL check is the snapshot shipped with the Kusto backend (2024-09-12), cleaned of parse artifacts and topped up for the seven endpoint tables from Microsoft Learn (checked 2026-11-22: `ProcessUniqueId`, `InitiatingProcessUniqueId`, `LogonID`). Its generator read a docs repository that is now private, so upstream won't refresh it. If drift becomes a problem, vendor a names-and-types JSON regenerated from Learn (`Accept: text/markdown` on `advanced-hunting-<table>-table`) by a dev-only script. A column Defender added later is reported as unknown; the reviewer can accept such a query as written.
 - The KQL prompt says DNS lookups are DeviceEvents `ActionType == "DnsQueryResponse"`. No public Microsoft page confirms the ActionType values; community sources also show DeviceNetworkEvents `DnsConnectionInspected`. Verify in a real tenant at enterprise handoff.
-- Only systemic model errors (credentials, model access, rate limit, outage: `LLMError.systemic`) stop the remaining groups after a failed KQL call. The Sigma call still stops on any non-refusal error; consider the same rule there.
+- Only systemic model errors (credentials, model access, rate limit, outage: `LLMError.systemic`) stop the remaining groups, after a failed Sigma, lint-repair or KQL call. A refusal or a one-off failure (token limit, malformed output) costs only that group its rule.
 
 ## P4–P7, P10 notes
 

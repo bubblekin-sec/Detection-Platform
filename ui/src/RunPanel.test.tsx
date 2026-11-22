@@ -69,6 +69,84 @@ describe('RunPanel', () => {
     expect(api.calls.find((call) => call.route === 'POST /api/articles/10/runs')?.body).toEqual({ profile: 'detection' })
   })
 
+  it('says when no worker is running and how to start one, and cancels the queued run', async () => {
+    const cancelled: PipelineRun = { ...base, status: 'failed', error: 'Cancelled before it started.' }
+    let current = base
+    const api = fakeApi({
+      'GET /api/articles/10/runs': () => ({ status: 200, body: [base] }),
+      'GET /api/runs/7': () => ({ status: 200, body: current }),
+      'GET /api/worker': () => ({ status: 200, body: { alive: false, last_seen_at: null, queued: 1, running: 0 } }),
+      'POST /api/runs/7/cancel': () => {
+        current = cancelled
+        return { status: 200, body: cancelled }
+      },
+    })
+    const user = userEvent.setup()
+    render(<RunPanel articleId={10} pollMs={5} />)
+
+    expect(await screen.findByText('No worker is running')).toBeInTheDocument()
+    expect(screen.getByText('uv run python -m app.worker')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancel run' }))
+
+    expect(await screen.findByText(/Cancelled before it started\./)).toBeInTheDocument()
+    expect(screen.queryByText('No worker is running')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run again' })).toBeEnabled()
+    expect(api.calls.some((call) => call.route === 'POST /api/runs/7/cancel')).toBe(true)
+  })
+
+  it('says the run is next when a worker is busy with another run', async () => {
+    fakeApi({
+      'GET /api/articles/10/runs': () => ({ status: 200, body: [base] }),
+      'GET /api/runs/7': () => ({ status: 200, body: base }),
+      'GET /api/worker': () => ({ status: 200, body: { alive: true, last_seen_at: '2026-11-22T12:00:00Z', queued: 1, running: 1 } }),
+    })
+    render(<RunPanel articleId={10} pollMs={5} />)
+
+    expect(await screen.findByText(/busy and will pick this one up when it is free/)).toBeInTheDocument()
+    expect(screen.queryByText('No worker is running')).not.toBeInTheDocument()
+  })
+
+  it('says when the worker processing a running run stopped, and lets the reviewer cancel it', async () => {
+    const running: PipelineRun = { ...base, status: 'running', current_step: 'extraction' }
+    let current = running
+    fakeApi({
+      'GET /api/articles/10/runs': () => ({ status: 200, body: [running] }),
+      'GET /api/runs/7': () => ({ status: 200, body: current }),
+      'GET /api/worker': () => ({ status: 200, body: { alive: false, last_seen_at: null, queued: 0, running: 1, orphaned: 1 } }),
+      'POST /api/runs/7/cancel': () => {
+        current = { ...running, status: 'failed', error: 'The worker processing this run stopped before finishing. Run it again.' }
+        return { status: 200, body: current }
+      },
+    })
+    const user = userEvent.setup()
+    render(<RunPanel articleId={10} pollMs={5} />)
+
+    expect(await screen.findByText('The worker processing this run stopped')).toBeInTheDocument()
+    expect(screen.queryByText(/Running: extraction/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancel run' }))
+
+    expect(await screen.findByText(/stopped before finishing\. Run it again\./)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run again' })).toBeEnabled()
+  })
+
+  it('explains a cancel that lost the race to the worker', async () => {
+    fakeApi({
+      'GET /api/articles/10/runs': () => ({ status: 200, body: [base] }),
+      'GET /api/runs/7': () => ({ status: 200, body: base }),
+      'GET /api/worker': () => ({ status: 200, body: { alive: true, last_seen_at: null, queued: 1, running: 0 } }),
+      'POST /api/runs/7/cancel': () => ({
+        status: 409,
+        body: { detail: { errors: ['Run 7 is running; only a queued run can be cancelled.'] } },
+      }),
+    })
+    const user = userEvent.setup()
+    render(<RunPanel articleId={10} pollMs={5} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Cancel run' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('only a queued run can be cancelled')
+  })
+
   it('shows an existing filtered-out run on load', async () => {
     fakeApi({
       'GET /api/articles/10/runs': () => ({

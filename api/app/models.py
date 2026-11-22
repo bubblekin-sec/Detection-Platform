@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
+from sqlalchemy import JSON, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -92,6 +92,18 @@ class ProfileVersion(Base):
     profile: Mapped[Profile] = relationship()
 
 
+class WorkerHeartbeat(Base):
+    """One row per running worker process, refreshed every poll and removed on a clean stop, so the UI can tell
+    "queued behind a busy worker" from "queued with no worker at all"."""
+
+    __tablename__ = "worker_heartbeats"
+
+    worker_id: Mapped[str] = mapped_column(String(100), primary_key=True)  # host:pid
+    provider: Mapped[str] = mapped_column(String(20))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
     __table_args__ = (
@@ -116,6 +128,8 @@ class PipelineRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # last progress, for stall detection
+    # The worker (WorkerHeartbeat.worker_id) that claimed it: when that worker stops beating, the run is orphaned.
+    claimed_by: Mapped[str | None] = mapped_column(String(100))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     profile_version: Mapped[ProfileVersion] = relationship()
@@ -181,8 +195,12 @@ class DetectionRule(Base):
     reviewer_note: Mapped[str | None] = mapped_column(Text)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # An earlier rule with the same log source and near-identical detection values (app/detection/dedup.py).
+    duplicate_of: Mapped[str | None] = mapped_column(ForeignKey("detection_rules.id", ondelete="SET NULL"), index=True)
+    duplicate_similarity: Mapped[float | None] = mapped_column(Float)
 
     queries: Mapped[list["RuleQuery"]] = relationship(order_by="RuleQuery.id", cascade="all, delete-orphan")
+    duplicate: Mapped["DetectionRule | None"] = relationship(remote_side=[id], lazy="joined", join_depth=1)
 
 
 class RuleQuery(Base):

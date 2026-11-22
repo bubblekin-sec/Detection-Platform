@@ -288,6 +288,27 @@ h2 {
   margin: 16px 0 24px;
 }
 
+.run-queued {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.run-queued .banner {
+  margin: 0;
+}
+
+.run-queued .banner p,
+.run-queued .banner ul {
+  margin: 0;
+}
+
+.run-queued .banner ul {
+  padding-left: 18px;
+  margin-top: 6px;
+}
+
 .run-header {
   display: flex;
   justify-content: space-between;
