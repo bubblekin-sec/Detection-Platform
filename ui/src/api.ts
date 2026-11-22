@@ -239,6 +239,18 @@ export function listRules(filter: { status?: DetectionRule['status']; articleId?
   if (filter.articleId !== undefined) params.set('article_id', String(filter.articleId))
   return request<RuleDetail[]>('GET', `/api/rules?${params}`)
 }
+/** An article in the review queue (`GET /api/rules/by-article`), with what helps pick the next one. */
+export interface ReviewArticle {
+  article: { id: number; title: string; url: string; source: { id: number; name: string } }
+  priority: { score: number; band: Band } | null
+  relevance: { score: number; min_score: number } | null
+  run_id: number
+  rules: Record<DetectionRule['status'], number>
+  duplicates: number
+  last_decided_at: string | null
+}
+export const listReviewArticles = (status: DetectionRule['status']) =>
+  request<ReviewArticle[]>('GET', `/api/rules/by-article?status=${status}`)
 export const getRuleCounts = () => request<Record<DetectionRule['status'], number>>('GET', '/api/rules/counts')
 export const getDashboard = () => request<Dashboard>('GET', '/api/dashboard')
 

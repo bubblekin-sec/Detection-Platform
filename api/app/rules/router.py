@@ -5,15 +5,17 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy import and_, func, select
+from sqlalchemy.orm import Session, defer, joinedload, selectinload
 
 from app.db import get_session
 from app.detection.lint import lint_kql
 from app.detection.rules import identity_error, pin_platform_fields
 from app.detection.sigma import parse_sigma
-from app.models import RULE_STATUSES, Article, DetectionRule, RuleQuery
+from app.models import RULE_STATUSES, Article, ArticleScore, DetectionRule, RuleQuery, StageResult
+from app.pipeline.priority import band as band_of
 from app.pipeline.rule_generation import converted_query, rule_level, sigma_digest
+from app.profiles.seed import latest_version
 from app.rules.duplicates import release_duplicates_of
 from app.rules.export import export_rules
 from app.runs.router import RuleOut, TelemetryDep, rule_out
@@ -123,6 +125,96 @@ def export_approved_rules(session: SessionDep, status: Literal["approved"] = "ap
         media_type="application/yaml",
         headers={"Content-Disposition": 'attachment; filename="approved-rules.yaml"'},
     )
+
+
+class QueueSource(BaseModel):
+    id: int
+    name: str
+
+
+class QueueArticle(BaseModel):
+    id: int
+    title: str
+    url: str
+    source: QueueSource
+
+
+class QueuePriority(BaseModel):
+    score: float
+    band: str
+
+
+class QueueRelevance(BaseModel):
+    score: float
+    min_score: float
+
+
+class ReviewArticle(BaseModel):
+    """One article in the review queue, with what helps decide which to open next."""
+
+    article: QueueArticle
+    priority: QueuePriority | None  # the detection profile's latest score
+    relevance: QueueRelevance | None  # the verdict of the run that produced its newest rules
+    run_id: int  # that run
+    rules: dict[str, int]  # rules of the article per status, every run
+    duplicates: int  # rules in the requested status flagged as likely duplicates
+    last_decided_at: datetime | None
+
+
+@router.get("/by-article", response_model=list[ReviewArticle])
+def review_queue(
+    session: SessionDep,
+    status: RuleStatus = "pending_review",
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+) -> list[ReviewArticle]:
+    """Articles with at least one rule in `status`: pending ones highest priority first, decided ones latest first."""
+    in_status = DetectionRule.status == status
+    counts = (
+        select(
+            DetectionRule.article_id,
+            *(func.count().filter(DetectionRule.status == name).label(name) for name in RULE_STATUSES),
+            func.count().filter(in_status, DetectionRule.duplicate_of.is_not(None)).label("duplicates"),
+            func.max(DetectionRule.reviewed_at).label("last_decided_at"),
+            func.max(DetectionRule.run_id).label("run_id"),
+        )
+        .group_by(DetectionRule.article_id)
+        .having(func.count().filter(in_status) > 0)
+        .subquery()
+    )
+    version = latest_version(session, "detection")
+    query = (
+        select(Article, counts, ArticleScore.score)
+        .join(counts, counts.c.article_id == Article.id)
+        .outerjoin(ArticleScore, and_(ArticleScore.article_id == Article.id,
+                                      ArticleScore.profile_version_id == (version.id if version else None)))
+        .options(joinedload(Article.source), defer(Article.content_text))
+    )
+    if status == "pending_review":
+        query = query.order_by(ArticleScore.score.desc().nulls_last(), Article.id.desc())
+    else:
+        query = query.order_by(counts.c.last_decided_at.desc().nulls_last(), Article.id.desc())
+    rows = session.execute(query.limit(limit)).all()
+
+    verdicts = {
+        stage.run_id: stage.output
+        for stage in session.scalars(select(StageResult).where(
+            StageResult.run_id.in_([row.run_id for row in rows]), StageResult.stage == "relevance", StageResult.status != "failed",
+        ))
+    }
+    result = []
+    for row in rows:
+        article, verdict = row.Article, verdicts.get(row.run_id)
+        result.append(ReviewArticle(
+            article=QueueArticle(id=article.id, title=article.title, url=article.url,
+                                 source=QueueSource(id=article.source.id, name=article.source.name)),
+            priority=None if row.score is None else QueuePriority(score=row.score, band=band_of(row.score)),
+            relevance=QueueRelevance(score=verdict["score"], min_score=verdict["min_score"]) if verdict else None,
+            run_id=row.run_id,
+            rules={name: getattr(row, name) for name in RULE_STATUSES},
+            duplicates=row.duplicates,
+            last_decided_at=row.last_decided_at,
+        ))
+    return result
 
 
 @router.get("/{rule_id}", response_model=RuleDetail)

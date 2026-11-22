@@ -1334,3 +1334,112 @@ mark.hl-negative { box-shadow: inset 0 -2px 0 var(--danger); }
 
 .chip-good { color: var(--text); }
 .chip-negative { color: var(--danger); }
+
+/* Review: view switch, then the queue of articles with rules in the chosen status. */
+.review-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.review-controls .tabs {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.segmented button {
+  background: var(--surface);
+  color: var(--muted);
+  border: none;
+  border-radius: 0;
+  padding: 6px 12px;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--border);
+}
+
+.segmented button.is-selected {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.queue-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 130px 220px;
+  gap: 4px 14px;
+  align-items: center;
+  padding: 10px 14px;
+}
+
+.queue-row + .queue-row {
+  border-top: 1px solid var(--border);
+}
+
+.queue-main {
+  display: grid;
+  min-width: 0;
+}
+
+.queue-main a {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.queue-duplicates {
+  display: block;
+  color: var(--muted);
+}
+
+.decided-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 16px;
+}
+
+.decided-bar .banner {
+  margin: 0;
+}
+
+.next-in-queue {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.next-in-queue p {
+  margin: 0;
+}
+
+@media (max-width: 1000px) {
+  .queue-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .queue-relevance,
+  .queue-counts {
+    grid-column: 2;
+  }
+}

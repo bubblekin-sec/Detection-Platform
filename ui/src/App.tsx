@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 
 import { getRuleCounts } from './api'
 import { ArticleReader } from './ArticleReader'
@@ -48,12 +48,23 @@ export function App() {
   const page = route(location.path)
   const [pending, setPending] = useState<number | null>(null)
   const [rulesChanged, setRulesChanged] = useState(0)
-  // The queue view (sort, filters, page) the user last had, so "All articles" returns to it.
-  const queueSearch = useRef('')
-
-  useEffect(() => {
-    if (page.page === 'articles') queueSearch.current = location.search
-  }, [page.page, location.search])
+  // Where an article page's back link goes: the article list view (sort, filters, page) or the review queue the
+  // user came from. Opening an article from the dashboard goes back to the article list.
+  const [returnTo, setReturnTo] = useState({ label: 'All articles', href: '/articles' })
+  const [articlesHref, setArticlesHref] = useState('/articles')
+  const here =
+    page.page === 'articles'
+      ? { label: 'All articles', href: `/articles${location.search}` }
+      : page.page === 'review'
+        ? { label: 'Review queue', href: `/review${location.search}` }
+        : page.page === 'dashboard'
+          ? { label: 'All articles', href: articlesHref }
+          : null
+  if (here && (here.href !== returnTo.href || here.label !== returnTo.label)) {
+    setReturnTo(here)
+    if (page.page === 'articles') setArticlesHref(here.href)
+  }
+  const fromReview = returnTo.href.startsWith('/review')
 
   // Refresh the review badge when the page changes or a rule is reviewed (cheap: one count query).
   useEffect(() => {
@@ -118,14 +129,18 @@ export function App() {
             view={parseReaderView(location.search)}
             // switching between the text views keeps the reader's place in the article
             onViewChange={(view) => navigate(`/articles/${page.id}?view=${view}`, { keepScroll: view !== 'rules' })}
-            onBack={() => navigate(`/articles${queueSearch.current}`)}
+            backLabel={returnTo.label}
+            onBack={() => navigate(returnTo.href)}
             onOpenArticle={(id) => navigate(`/articles/${id}`)}
+            onOpenNext={fromReview ? (id) => navigate(`/articles/${id}?view=rules`) : undefined}
             onRulesChanged={() => setRulesChanged((count) => count + 1)}
           />
         )}
         {page.page === 'review' && (
           <ReviewPage
-            onOpenArticle={(id) => navigate(`/articles/${id}`)}
+            search={location.search}
+            onQueryChange={(search) => navigate(`/review${search}`)}
+            onOpenArticle={(id, view) => navigate(`/articles/${id}${view ? `?view=${view}` : ''}`)}
             onRulesChanged={() => setRulesChanged((count) => count + 1)}
           />
         )}

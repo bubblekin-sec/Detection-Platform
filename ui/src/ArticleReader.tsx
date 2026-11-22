@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import {
   describeError,
   getArticle,
+  listReviewArticles,
   listRules,
   type ArticleDetail,
   type PipelineRun,
@@ -120,16 +121,20 @@ export function ArticleReader({
   id,
   view,
   onViewChange = () => {},
+  backLabel = 'All articles',
   onBack,
   onOpenArticle = () => {},
+  onOpenNext,
   onRulesChanged = () => {},
   pollMs,
 }: {
   id: number
   view?: ReaderView // from the URL; undefined picks Rules when a rule is pending, else Filtering
   onViewChange?: (view: ReaderView) => void
+  backLabel?: string
   onBack: () => void
   onOpenArticle?: (id: number) => void
+  onOpenNext?: (id: number) => void // set when the reviewer came from the review queue: offers the next article
   onRulesChanged?: () => void // e.g. so the sidebar's pending count follows decisions made here
   pollMs?: number
 }) {
@@ -245,7 +250,7 @@ export function ArticleReader({
   return (
     <article className="page reader">
       <button type="button" className="link-button back" onClick={onBack}>
-        ← All articles
+        ← {backLabel}
       </button>
       {error && (
         <p className="banner banner-error" role="alert">
@@ -358,6 +363,8 @@ export function ArticleReader({
 
           {shown === 'rules' && (
             <RulesView
+              articleId={id}
+              onOpenNext={onOpenNext}
               run={run}
               rules={rules}
               error={rulesError}
@@ -384,12 +391,16 @@ function notExtracted(run: PipelineRun | null | undefined): string {
 }
 
 function RulesView({
+  articleId,
+  onOpenNext,
   run,
   rules,
   error,
   onUpdated,
   onOpenArticle,
 }: {
+  articleId: number
+  onOpenNext?: (id: number) => void
   run: PipelineRun | null | undefined
   rules: RuleDetail[] | undefined
   error: string | null
@@ -441,9 +452,12 @@ function RulesView({
       )}
       {(rules === undefined || run === undefined) && <p className="muted">Loading rules…</p>}
       {rules && rules.length > 0 && pending.length === 0 && (
-        <p className="banner banner-ok" role="status" tabIndex={-1} ref={decided}>
-          All {plural(rules.length, 'rule')} decided ({approved} approved, {rules.length - approved} rejected).
-        </p>
+        <div className="decided-bar">
+          <p className="banner banner-ok" role="status" tabIndex={-1} ref={decided}>
+            All {plural(rules.length, 'rule')} decided ({approved} approved, {rules.length - approved} rejected).
+          </p>
+          {onOpenNext && <NextInQueue currentId={articleId} onOpen={onOpenNext} />}
+        </div>
       )}
       {run !== undefined && rules && rules.length === 0 && !generation && !running && (
         <p className="muted">
@@ -468,5 +482,40 @@ function RulesView({
         </div>
       ))}
     </section>
+  )
+}
+
+/** Opens the highest-priority other article still waiting for review (the queue is read fresh, so it never goes stale). */
+function NextInQueue({ currentId, onOpen }: { currentId: number; onOpen: (id: number) => void }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'empty' | string>('idle')
+
+  async function next() {
+    setState('loading')
+    try {
+      const queue = await listReviewArticles('pending_review')
+      const target = queue.find((row) => row.article.id !== currentId)
+      if (target) onOpen(target.article.id)
+      else setState('empty')
+    } catch (failure) {
+      setState(`Could not load the review queue: ${describeError(failure)}`)
+    }
+  }
+
+  return (
+    <div className="next-in-queue">
+      <button type="button" onClick={() => void next()} disabled={state === 'loading'}>
+        Next article in queue →
+      </button>
+      {state === 'empty' && (
+        <p className="muted" role="status">
+          No other article is waiting for review.
+        </p>
+      )}
+      {state !== 'idle' && state !== 'loading' && state !== 'empty' && (
+        <p className="form-error" role="alert">
+          {state}
+        </p>
+      )}
+    </div>
   )
 }
