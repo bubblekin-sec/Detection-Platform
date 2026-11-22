@@ -10,6 +10,8 @@ Use the package manifests, lockfiles, contributor guide, and CI configuration to
 
 Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.md). Moving to the enterprise: [docs/enterprise-handoff.md](docs/enterprise-handoff.md).
 
+Portable copy of this workflow for VS Code (Claude Code and GitHub Copilot): [agent-kit/README.md](agent-kit/README.md). After changing a skill, agent or rule in `.claude/`, run `py -3 agent-kit/kit.py refresh` (from the repo root) and make the same change in `agent-kit/copilot/` by hand; `refresh --check` exits 1 on drift.
+
 ### API (`api/`, Python 3.13, uv)
 
 | Task | Command (run in `api/`) | Status |
