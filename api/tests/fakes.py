@@ -66,6 +66,8 @@ class ScriptedLLM:
             output = output()  # a callback can probe state mid-call (locks, run status) and return the output
         if isinstance(output, BaseException):
             raise output
+        if isinstance(output, LLMResult):  # a full result scripts the served model, e.g. a fallback
+            return output
         if isinstance(output, dict):  # dynamic schemas (extraction) are queued as plain data
             output = schema.model_validate(output)
         usage = LLMUsage(input_tokens=1200, output_tokens=150, cache_read_tokens=0)

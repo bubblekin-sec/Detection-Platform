@@ -1,6 +1,6 @@
 # Plan: priority scoring, gated model use, workbench UI, then 6b
 
-Status: P1–P11 done, P12 (lint-driven repair round) next.
+Status: P1–P12 done. Next: increment 8 (YAML export), then 9 (containers).
 
 **P2/P3 notes.**
 - Detection profile v2 (`detection.yaml` `version: 2`) expands `priority: {source: huntable_keyword_registry, threshold: 37.5}` into concrete lists at seed time, so the stored version is self-contained. Seeding adds a higher seed version beside existing ones and never edits them.
@@ -82,7 +82,8 @@ Status: P1–P11 done, P12 (lint-driven repair round) next.
 - No router or chart library: five routes and bar charts don't justify one (reconsider for nested layouts or time-axis charts).
 - After P11, a Sigma edit in review can't regenerate stale LLM-written KQL, because the API has no LLM client.
 - A Sigma edit in review always adds a fresh `converted` artifact, even under the `llm` strategy; the model-written artifact is marked stale and can be replaced by hand-edited KQL.
-- The Defender XDR catalog used by the KQL check is a snapshot shipped with the Kusto backend (dated in its file header). A column Defender added later is reported as unknown; the reviewer can accept such a query as written.
+- The Defender XDR catalog used by the KQL check is the snapshot shipped with the Kusto backend (2024-09-12), cleaned of parse artifacts and topped up for the seven endpoint tables from Microsoft Learn (checked 2026-11-22: `ProcessUniqueId`, `InitiatingProcessUniqueId`, `LogonID`). Its generator read a docs repository that is now private, so upstream won't refresh it. If drift becomes a problem, vendor a names-and-types JSON regenerated from Learn (`Accept: text/markdown` on `advanced-hunting-<table>-table`) by a dev-only script. A column Defender added later is reported as unknown; the reviewer can accept such a query as written.
+- The KQL prompt says DNS lookups are DeviceEvents `ActionType == "DnsQueryResponse"`. No public Microsoft page confirms the ActionType values; community sources also show DeviceNetworkEvents `DnsConnectionInspected`. Verify in a real tenant at enterprise handoff.
 - Only systemic model errors (credentials, model access, rate limit, outage: `LLMError.systemic`) stop the remaining groups after a failed KQL call. The Sigma call still stops on any non-refusal error; consider the same rule there.
 
 ## P4–P7, P10 notes
@@ -97,3 +98,4 @@ Status: P1–P11 done, P12 (lint-driven repair round) next.
 - **Measured on 500 KB of text:** score 0.07 s, spans 0.16 s (capped at 2000, `spans_truncated`), evidence index 0.06 s, 300 quote lookups 0.01 s.
 - **Article detail (P9):** two columns, the text with keyword and evidence highlights (each toggleable, with a legend), and the priority breakdown with the run panel. Highlights are split by one sweep (`ui/src/highlight.ts`): about 5 ms for 2000 marks. Polling a run re-renders the text only when its evidence changes, and the API builds the evidence index only when a run has verified evidence.
 - **Model-written KQL (P11):** one call per rule when the strategy asks for it (no retry), using `RULES_MODEL` with refusal fallbacks. The prompt carries the column catalog of the seven endpoint event tables; the check uses all 38 tables of the catalog shipped with the Kusto backend. The check is lexical (Defender columns are PascalCase, KQL keywords and functions lowercase); it accepted every converter-produced query in the dev database. A failed or refused KQL call leaves a `failed` artifact and keeps the Sigma rule; a non-refusal error skips the remaining groups, like a Sigma call error.
+- **Lint repair (P12):** when a valid rule converts to KQL that compares against a literal `*` (usually a trailing backslash in the Sigma), the model gets one rewrite with the warnings and its previous rule. The rewrite replaces the rule only if it validates, converts, and has no such warning; otherwise the original is kept with its warning and the group output records `lint_repair: discarded` and why. A clean rule, and the registry advisory (which needs a reviewer), make no call. The `llm` strategy produces no converted query, so it gets no repair. A refused or one-off error keeps the original; a systemic error also skips the remaining groups. Each rule is converted once.

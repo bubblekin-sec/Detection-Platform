@@ -10,21 +10,28 @@ QUOTED = re.compile(r'"([^"]*)"')
 
 
 def lint_kql(kql: str | None, *, sigma_yaml: str = "") -> list[str]:
-    warnings: list[str] = []
     if not kql:
-        return warnings
-    for match in SINGLE_VALUE.finditer(kql):
-        if "*" in match.group(2):
-            warnings.append(_star_warning(match.group(0), match.group(1)))
-    for match in LIST_VALUE.finditer(kql):
-        if any("*" in value for value in QUOTED.findall(match.group(2))):
-            warnings.append(_star_warning(match.group(0)[:120], match.group(1)))
+        return []
+    warnings = literal_star_warnings(kql)
     if "Registry" in kql and _registry_value_may_include_name(sigma_yaml):
         warnings.append(
             "Defender keeps the registry value name in RegistryValueName, but the converted query matches TargetObject "
             "against RegistryKey only. If the Sigma value includes a value name (e.g. ...\\Run\\Updater), add a "
             "RegistryValueName condition or match the key alone."
         )
+    return warnings
+
+
+def literal_star_warnings(kql: str) -> list[str]:
+    """Comparisons against a literal * — a fault in the Sigma (usually a trailing backslash) that a rewrite can fix,
+    unlike the registry advisory, which needs a reviewer's judgement."""
+    warnings: list[str] = []
+    for match in SINGLE_VALUE.finditer(kql):
+        if "*" in match.group(2):
+            warnings.append(_star_warning(match.group(0), match.group(1)))
+    for match in LIST_VALUE.finditer(kql):
+        if any("*" in value for value in QUOTED.findall(match.group(2))):
+            warnings.append(_star_warning(match.group(0)[:120], match.group(1)))
     return warnings
 
 
