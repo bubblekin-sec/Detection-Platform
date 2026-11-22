@@ -28,6 +28,19 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 | New migration | `uv run alembic revision --autogenerate -m "<change>" --rev-id <NNNN>`, then review the generated file | verified |
 | Run locally | `uv run uvicorn app.main:app --reload` (http://localhost:8000/api/health, docs at `/docs`) | verified |
 | Container image | `docker build -t detection-api .` then `docker run --rm -p 8000:8000 detection-api` | verified (runs as uid 10001) |
+| Readiness | `GET /api/ready` (200, or 503 `database: unreachable`); `/api/health` is liveness and never touches the database | verified |
+
+### Compose stack (repo root)
+
+| Task | Command (run in the repo root) | Status |
+| --- | --- | --- |
+| Whole stack | `docker compose up -d --build`: db, one-shot `migrate` (migrations + both seeds), api (not published), ui at http://127.0.0.1:8080 (`UI_PORT` overrides) | verified |
+| Worker (opt-in, spends) | `docker compose --profile worker up -d`. `LLM_PROVIDER` and `ANTHROPIC_API_KEY` come from `api/.env` only (set `LLM_PROVIDER=offline` there to run without a model). | verified (settings resolved; not started) |
+| Smoke test | `bash scripts/compose-smoke.sh` (builds, starts, probes through nginx, recreates the API on a new address; leaves the stack running) | verified |
+| Stop | `docker compose --profile worker down` (keeps the database volume; without `--profile worker` a worker container is left behind). Then `docker compose up -d --wait db` for local work. | verified |
+
+- The stack shares the `db` service and its data with local `uv run` work. Compose sets `DATABASE_URL` to `db:5432` for its services, overriding `api/.env`.
+- The UI image (`ui/Dockerfile`) builds on `node:22-slim` and serves from `nginxinc/nginx-unprivileged` on 8080. `ui/nginx/templates/default.conf.template` is rendered at start with `API_UPSTREAM` (an origin, no path; the container refuses to start otherwise). nginx re-resolves that name every 10 s, so an API restart doesn't need a UI restart.
 
 - `pysigma` is held at `>=1.5,<2` because `pysigma-backend-kusto` 1.x (the Defender XDR converter) requires pySigma 1.x. Move to pySigma 2.x only when the backend supports it, and re-run the tests. Older backends (0.4.x) declare `pysigma>=0.10` but break on 1.x and 2.x, so never leave the backend unpinned.
 - Sigma validation lives only in `app/detection/sigma.py`; Defender XDR KQL conversion only in `app/detection/kql.py`.
@@ -52,5 +65,5 @@ Feature plan: [docs/plans/intel-to-detection.md](docs/plans/intel-to-detection.m
 | Build | `npm run build` (outputs to `dist/`) | verified |
 | Dev server | `npm run dev` (http://localhost:5173; proxies `/api` to `http://127.0.0.1:8000`, override with `API_PROXY_TARGET`) | verified |
 
-- The UI calls only the same-origin `/api` path. Never put an API hostname into the bundle. In the container, nginx is planned to proxy `/api` (increment 9). It does not exist yet.
+- The UI calls only the same-origin `/api` path. Never put an API hostname into the bundle. In the container, nginx proxies `/api` to `API_UPSTREAM` with the path unchanged.
 - All API calls go through `src/api.ts`. 4xx responses arrive as `{"detail": {"errors": ["field: message"]}}`; `ApiError.byField()` maps them onto form fields.

@@ -1,9 +1,12 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import Settings
 from app.articles.router import router as articles_router
@@ -15,6 +18,8 @@ from app.rules.router import router as rules_router
 from app.runs.router import router as runs_router
 from app.sources.fetch import Fetcher, build_fetcher
 from app.sources.router import router as sources_router
+
+log = logging.getLogger(__name__)
 
 
 async def request_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
@@ -50,7 +55,19 @@ def create_app(settings: Settings | None = None, *, fetcher: Fetcher | None = No
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
+        """Liveness: the process answers. Never touches dependencies, so a database outage doesn't restart it."""
         return {"status": "ok"}
+
+    @app.get("/api/ready", responses={503: {"description": "The database is unreachable."}})
+    def ready() -> JSONResponse:
+        """Readiness: every other endpoint needs the database. The error never echoes the URL or the driver's text."""
+        try:
+            with app.state.engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+        except SQLAlchemyError:
+            log.warning("Readiness check: the database is unreachable")
+            return JSONResponse(status_code=503, content={"detail": {"errors": ["database: unreachable"]}})
+        return JSONResponse({"status": "ok"})
 
     app.include_router(detection_router)
     app.include_router(sources_router)

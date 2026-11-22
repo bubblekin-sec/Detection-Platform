@@ -1,4 +1,16 @@
 # Local development stack. Credentials here are for a laptop-only database and are not used in any deployed environment.
+#
+#   docker compose up -d --wait db           # just Postgres, for `uv run ...` and the test suite
+#   docker compose up -d --build             # db, migrate, api and ui (http://127.0.0.1:8080)
+#   docker compose --profile worker up -d    # also the worker, using ANTHROPIC_API_KEY from api/.env (spends money)
+#
+# The stack shares the dev database with local `uv run` work. The worker is opt-in so nothing claims queued runs
+# unless you ask for it.
+
+x-api-database: &api-database
+  # Overrides any 127.0.0.1 URL from api/.env: inside the compose network the database is `db`.
+  DATABASE_URL: postgresql+psycopg://detection:detection@db:5432/detection
+
 services:
   db:
     image: postgres:17
@@ -16,6 +28,66 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  # One-shot: schema and seed data (both seed commands only add what is missing). A Container Apps Job in Azure.
+  migrate:
+    build: ./api
+    image: detection-api
+    command: ["sh", "-c", "alembic upgrade head && python -m app.cli seed-sources && python -m app.cli seed-profiles"]
+    environment: *api-database
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: ./api  # the same image as migrate and worker; built once, reused from the cache
+    image: detection-api
+    environment: *api-database  # the API never calls a model, so it gets no key
+    expose:
+      - "8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # The slim image has no curl.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  worker:
+    build: ./api
+    image: detection-api
+    profiles: [worker]
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - path: api/.env
+        required: false
+    # LLM_PROVIDER and ANTHROPIC_API_KEY come from api/.env only: `environment:` would override it.
+    environment: *api-database
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: on-failure:3  # a missing key exits 2 at startup; don't loop on it
+
+  ui:
+    build: ./ui
+    image: detection-ui
+    environment:
+      API_UPSTREAM: http://api:8000
+    ports:
+      - "127.0.0.1:${UI_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
 
 volumes:
   db-data:

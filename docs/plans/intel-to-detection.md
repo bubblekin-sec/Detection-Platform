@@ -1,6 +1,6 @@
 # Plan: Threat intelligence → detection (MVP)
 
-Status: increments 1 to 8 done, plus the priority and workbench phase in [priority-and-workbench.md](priority-and-workbench.md). Next: increment 9 (containers).
+Status: increments 1 to 9 done, plus the priority and workbench phase in [priority-and-workbench.md](priority-and-workbench.md). Next: increment 10 (batch dedup). Azure provisioning is a separate task; its inputs are listed in "Increment 9 notes".
 
 **7 notes (review).**
 - **API:**
@@ -237,6 +237,26 @@ docker-compose.yml  THIRD_PARTY_NOTICES.md
 | 8 | YAML export | Approved rules only, the output re-validates, and ids are stable |
 | 9 | Containers end to end (ui/nginx, api, worker, db) | `/api/health` responds through nginx in compose |
 | 10 | Batch dedup | Table-driven pairs: Jaccard ≥ 0.80, or containment with ≥ 3 values and Jaccard ≥ 0.60 |
+
+## Increment 9 notes (2026-11-22)
+
+**Local (verified by `bash scripts/compose-smoke.sh`).** `docker compose up -d --build` starts db, a one-shot `migrate` (`alembic upgrade head` and both seeds), the api (not published) and the ui (nginx on 127.0.0.1:8080). Through nginx: `/api/health` and `/api/ready` give 200, an unknown `/api/...` stays a JSON 404, client routes fall back to `index.html`, a missing asset is a 404, and `/healthz` answers from nginx. With the api removed, `/api/...` gives 502 while `/healthz` stays 200; recreated on a different address, the api is reached again without a ui restart. The dashboard renders in a real browser with the Content-Security-Policy on. The worker is opt-in (`--profile worker`, decided 2026-11-22), because the stack shares the dev database and a worker would claim queued runs.
+
+**Azure Container Apps mapping (not provisioned).**
+
+| Workload | Image and command | Ingress and probes | Settings |
+| --- | --- | --- | --- |
+| ui | `ui/Dockerfile` | External, target port 8080. Liveness and readiness on `/healthz` (not tied to the api). | `API_UPSTREAM=https://<api-app>.internal.<environment default domain>`. Use https and the internal FQDN: the ingress redirects http to https by default (`allowInsecure: false`), and nginx's resolver ignores DNS search domains, so a short app name fails. |
+| api | `api/Dockerfile` (default command) | Internal, target port 8000. Liveness `/api/health`, readiness `/api/ready`. | `DATABASE_URL` as a secret reference, with `sslmode=require`. No model key. |
+| worker | same image, `python -m app.worker` | None. Min replicas 1; more replicas are safe (`SKIP LOCKED`). | `DATABASE_URL`, `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY` as a Key Vault or secret reference. Egress to `api.anthropic.com` and the feed hosts. |
+| migrate | same image, the compose `migrate` command | A manually triggered Container Apps Job, run by the deploy pipeline before a new api or worker revision. | `DATABASE_URL`. Migrations must stay compatible with the revision still running. |
+
+- nginx keeps the upstream's own `Host` (Container Apps ingress routes by Host) and passes `X-Forwarded-*`, keeping the scheme the ingress reports. An https upstream's certificate is verified against the image's CA bundle (enterprise check: the chain of `<api>.internal.<domain>` verifies from a ui replica). Upstream redirects are rewritten to the browser's origin, because nginx doesn't do that for a variable upstream.
+- `API_UPSTREAM` is validated at start: an http(s) origin with no path, query, fragment, quotes or `$`, otherwise the ui container exits 1.
+- `proxy_read_timeout` is 240 s to match the Container Apps ingress limit. A synchronous Fetch now on a large summary-only feed can exceed it and gives a 504, locally and in Azure; the planned scheduled fetch job removes this.
+- Enterprise inputs: the container registry and pull identity, the environment's internal domain, the egress policy, and the Postgres server (Azure Database for PostgreSQL flexible server, version 17).
+- `/docs` is not proxied. Readiness checks `SELECT 1` only; checking that the schema is at Alembic head would catch an api deployed before `migrate`, and can be added later. Readiness takes a pooled connection, so with every connection busy (e.g. several long Fetch now requests) it can wait up to the pool timeout (30 s): set the readiness probe's timeout and failure threshold with that in mind.
+- The worker restarts at most 3 times on failure, so a missing key doesn't loop. In the smoke test, the API is recreated on a new address while a placeholder container holds the old one, which proves nginx re-resolves it (a static `proxy_pass` fails that check).
 
 ## Increment 1 findings (2026-11-21)
 
